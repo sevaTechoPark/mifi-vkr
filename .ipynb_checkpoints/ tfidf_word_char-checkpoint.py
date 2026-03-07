@@ -22,6 +22,7 @@ def main():
         token_pattern=r"(?u)$$[A-Z_]+$$|\b\w\w+\b",
         lowercase=True,
     )
+
     char_tfidf = TfidfVectorizer(
         analyzer="char_wb",
         ngram_range=(3, 5),
@@ -29,6 +30,8 @@ def main():
         max_df=0.95,
         lowercase=True,
     )
+
+    # Объединяем два пространства признаков (конкатенация)
     features = FeatureUnion([
         ("word", word_tfidf),
         ("char", char_tfidf),

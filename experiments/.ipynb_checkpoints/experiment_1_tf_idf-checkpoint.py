@@ -7,8 +7,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import f1_score, accuracy_score
 
-TRAIN_PATH = "data/train.csv"
-TEST_PATH  = "data/test.csv"
+TRAIN_PATH = "../data/train.csv"
+TEST_PATH  = "../data/test.csv"
 
 LABEL_COL = "label"
 TEXT_COL = "text"

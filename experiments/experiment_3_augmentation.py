@@ -9,7 +9,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, accuracy_score
 
-from utils.augment_baseline import (
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from experiments.augmentation import (
     first_n_sentences,
     random_window_sentences,
     top_n_sentences_by_tfidf,
@@ -17,8 +22,9 @@ from utils.augment_baseline import (
     split_sentences,
 )
 
-TRAIN_PATH = "data/train.csv"
-TEST_PATH  = "data/test.csv"
+TRAIN_PATH = "../data/train.csv"
+TEST_PATH  = "../data/test.csv"
+
 LABEL_COL = "label"
 TEXT_COL = "text"
 RANDOM_STATE = 42

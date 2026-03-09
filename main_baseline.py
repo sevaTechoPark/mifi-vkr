@@ -3,6 +3,12 @@ from sklearn.pipeline import Pipeline, FeatureUnion
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
 from sklearn.metrics import accuracy_score, f1_score
+import joblib
+from pathlib import Path
+
+from utils.get_baseline_model import get_baseline_model
+
+MODEL_PATH = Path("models") / "baseline_tfidf_wordchar_linearsvc.joblib"
 
 TRAIN_PATH = "data/train.csv"
 TEST_PATH  = "data/test.csv"
@@ -59,7 +65,9 @@ def main():
     metrics = eval_model(model, X_test, y_test)
     print("BASELINE METRICS:", metrics)
 
+    joblib.dump(model, MODEL_PATH)
+    print("Saved model to:", MODEL_PATH)
+
+
 if __name__ == "__main__":
     main()
-
-# BASELINE METRICS: {'accuracy': 0.6394366197183099, 'macro_f1': 0.4400051801265337, 'weighted_f1': 0.6173177677259828}

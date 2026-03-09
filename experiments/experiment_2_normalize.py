@@ -7,10 +7,16 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.metrics import f1_score, accuracy_score
 
-from utils.text_normalize import normalize_text
+import sys
+from pathlib import Path
 
-TRAIN_PATH = "data/train.csv"
-TEST_PATH  = "data/test.csv"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from experiments.text_normalize import normalize_text
+
+TRAIN_PATH = "../data/train.csv"
+TEST_PATH  = "../data/test.csv"
+
 LABEL_COL = "label"
 TEXT_COL = "text"
 

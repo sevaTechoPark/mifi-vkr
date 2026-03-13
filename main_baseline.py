@@ -68,6 +68,5 @@ def main():
     joblib.dump(model, MODEL_PATH)
     print("Saved model to:", MODEL_PATH)
 
-
 if __name__ == "__main__":
     main()

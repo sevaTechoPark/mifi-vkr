@@ -20,6 +20,13 @@ model = get_baseline_model()
 pred = model.predict(["Текст письма..."])
 print(pred) # ['Генеральный директор']
 ```
+Сохранить модель в models
+
+# Скачивание llm-моделей
+```
+conda activate
+python utils/download_models.py
+```
 
 # Глоссарий
 

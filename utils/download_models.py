@@ -16,6 +16,7 @@ MODELS = [
     # не полноценные HF-модели для AutoModel*:
     # https://huggingface.co/SentiChain/aparecium-seq2seq-reverser
     # https://huggingface.co/xummer/deepseek-r1-8b-belebele-lora-rus-cyrl
+    ("facebook/nllb-200-distilled-600M", "translation")
 ]
 
 def is_model_downloaded(model_dir: Path) -> bool:

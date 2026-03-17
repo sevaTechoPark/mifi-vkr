@@ -20,7 +20,7 @@ from utils.get_baseline_model import get_baseline_model
 
 MODEL_PATH = Path("models") / "baseline_tfidf_wordchar_linearsvc.joblib"
 
-TRAIN_PATH = "data/train.csv" # train_augmentation.csv / train.csv
+TRAIN_PATH = "data/train_augmentation.csv" # train_augmentation.csv / train.csv
 TEST_PATH  = "data/test.csv"
 TEXT_COL = "text"
 LABEL_COL = "label"
@@ -52,9 +52,9 @@ def make_base_pipeline():
         ("clf", clf),
     ])
 
-def eval_model(model, X_test, y_test):
+def eval_model(model, X_test, y_test, ndigits=3):
     pred = model.predict(X_test)
-    return {
+    metrics = {
         "accuracy": accuracy_score(y_test, pred),
         "balanced_accuracy": balanced_accuracy_score(y_test, pred),
         "macro_precision": precision_score(y_test, pred, average="macro", zero_division=0),
@@ -66,6 +66,7 @@ def eval_model(model, X_test, y_test):
         "micro_f1": f1_score(y_test, pred, average="micro", zero_division=0),
         "mcc": matthews_corrcoef(y_test, pred),
     }
+    return {k: round(v, ndigits) for k, v in metrics.items()}
 
 def main():
     train_df = pd.read_csv(TRAIN_PATH)

@@ -2,8 +2,11 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 
-from .get_original_df import get_original_df
+from utils.get_original_df import get_processed_df
 
+project_root = Path(__file__).resolve().parents[1]
+data_dir = project_root / "data"
+    
 label_col="label"
 test_size=0.2
 random_state=42
@@ -15,7 +18,7 @@ def split_original_df():
     2) Классы с count <  min_count_for_strat: вручную кладём 1 пример в test, остальное в train.
        (предполагается, что в каждом таком классе >= 2 примера)
     """
-    df = get_original_df().reset_index(drop=True)
+    df = get_processed_df().reset_index(drop=True)
     print(f"Shape: df={df.shape}")
     print(f"Unique labels: df={df['label'].nunique()}")
 
@@ -50,9 +53,6 @@ def split_original_df():
     return train_df, test_df
 
 def save_train_test(train_df, test_df):
-    project_root = Path(__file__).resolve().parents[1]
-    data_dir = project_root / "data"
-    
     train_df.to_csv(data_dir / "train.csv", index=False)
     test_df.to_csv(data_dir / "test.csv", index=False)
     print(f'save stratify traint_test_split to {data_dir}')
@@ -62,3 +62,9 @@ def save_train_test(train_df, test_df):
         f"train={train_df['label'].nunique()}, "
         f"test={test_df['label'].nunique()}"
     )
+
+def main():
+    split_original_df()
+
+if __name__ == "__main__":
+    main()

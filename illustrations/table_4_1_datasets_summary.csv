@@ -1,0 +1,5 @@
+dataset,n_samples,n_classes,min_per_class,max_per_class,mean_per_class
+train,1419,36,1,202,39.416666666666664
+train_paraphrase,1845,36,30,202,51.25
+train_backtranslate,1816,36,1,202,50.44444444444444
+train_augmented,1994,36,30,202,55.388888888888886

@@ -6,8 +6,8 @@ project_root = Path(__file__).resolve().parents[1]
 data_dir = project_root / "data"
 
 train_path      = data_dir / "train.csv"
-para_path       = data_dir / "train_paraphrase.csv"
-bt_path         = data_dir / "train_backtranslate.csv"
+para_path       = data_dir / "train_paraphrase_3.csv"
+bt_path         = data_dir / "train_backtranslate_3.csv"
 
 def merge_augmentations():
     df_orig  = pd.read_csv(train_path)
@@ -57,7 +57,7 @@ def merge_augmentations():
     # перемешаем
     df_all = df_all.sample(frac=1.0, random_state=42).reset_index(drop=True)
     
-    df_all.to_csv(data_dir / "train_augmented.csv", index=False)
+    df_all.to_csv(data_dir / "train_augmented_3.csv", index=False)
     print(f"Итого строк в train_augmented.csv: {len(df_all)}")
 
 def main():

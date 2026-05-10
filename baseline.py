@@ -18,27 +18,13 @@ from pathlib import Path
 
 MODEL_PATH = Path("models") / "baseline_tfidf_wordchar_linearsvc.joblib"
 
-TRAIN_PATH = "data/train_augmented.csv" # train.csv / train_paraphrase.csv / train_backtranslate.csv / train_augmented.csv
+TRAIN_PATH = "data/train_paraphrase_3.csv" # train.csv / train_paraphrase.csv / train_backtranslate.csv / train_augmented.csv
 TEST_PATH  = "data/test.csv"
 TEXT_COL = "text"
 LABEL_COL = "label"
 
-print("train.csv", pd.read_csv("data/train.csv").shape)
-print("train_paraphrase.csv", pd.read_csv("data/train_paraphrase.csv").shape)
-print("train_backtranslate.csv", pd.read_csv("data/train_backtranslate.csv").shape)
-print("train_augmented.csv", pd.read_csv("data/train_augmented.csv").shape)
-df_orig  = pd.read_csv("data/train.csv")
-df_para  = pd.read_csv("data/train_paraphrase.csv")
-df_bt    = pd.read_csv("data/train_backtranslate.csv")
-df_aug   = pd.read_csv("data/train_augmented.csv")
-print("=== train.csv ===")
-print(df_orig["label"].value_counts().sort_index())
-print("\n=== train_paraphrase.csv ===")
-print(df_para["label"].value_counts().sort_index())
-print("\n=== train_backtranslate.csv ===")
-print(df_bt["label"].value_counts().sort_index())
-print("\n=== train_augmented.csv ===")
-print(df_aug["label"].value_counts().sort_index())
+df  = pd.read_csv(TRAIN_PATH)
+print(df["label"].value_counts().sort_index())
 
 def make_base_pipeline():
     word_tfidf = TfidfVectorizer(
@@ -95,17 +81,93 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-# baseline train_augmentation.csv balanced_accuracy: 0.444, macro_f1: 0.447
-# rubert_tiny2 train_augmentation.csv  balanced_accuracy: 0.116, macro_f1: 0.103
-
 # baseline train.csv balanced_accuracy: 0.443, macro_f1: 0.44
 # baseline train_paraphrase.csv balanced_accuracy: 0.462, macro_f1: 0.466
+# baseline train_paraphrase_2.csv balanced_accuracy: 0.451, macro_f1: 0.454
+# baseline train_paraphrase_3.csv balanced_accuracy: 0.463, macro_f1: 0.47
 # baseline train_backtranslate.csv balanced_accuracy: 0.463, macro_f1: 0.472
+# baseline train_backtranslate_2.csv balanced_accuracy: 0.451, macro_f1: 0.454
 # baseline train_augmented.csv balanced_accuracy: 0.463, macro_f1: 0.472
+# baseline train_augmented_2.csv balanced_accuracy: 0.467, macro_f1: 0.477
 
-# rubert-base-case train.csv  balanced_accuracy: 0.387, macro_f1: 0.387
-# rubert-base-case train_augmentation.csv  balanced_accuracy: 0.404, macro_f1: 0.4
-# rubert-base-case train_paraphrase.csv balanced_accuracy 0.429, macro_f1: 0.424
-# rubert-base-case train_backtranslate.csv balanced_accuracy: 0.431, macro_f1: 0.423
-# rubert-base-cased train_augmentated.csv balanced_accuracy: 0.648, macro_f1: 0.641
+# MAX_LENGTH = 256
+# BATCH_SIZE = 16
+# NUM_EPOCHS = 10
+# LR = 2e-5
+# WEIGHT_DECAY = 0.01
+# WARMUP_RATIO = 0.1
+# rubert-base-case train.csv  balanced_accuracy: 0.304768, macro_f1: 0.295318
+# rubert-base-case train_paraphrase.csv balanced_accuracy 0.369679, macro_f1: 0.377209
+# rubert-base-cased train_paraphrase_2.csv balanced_accuracy: 0.340045, macro_f1: 0.336009
+# rubert-base-case train_backtranslate.csv balanced_accuracy: 0.382728, macro_f1: 0.382456
+# rubert-base-cased train_backtranslate_2.csv balanced_accuracy: 0.348204, macro_f1: 0.347102
+# rubert-base-cased train_augmented.csv balanced_accuracy: 0.394003, macro_f1: 0.396188
+# rubert-base-cased train_augmented_2.csv balanced_accuracy: 0.361901, macro_f1: 0.364837
+
+# MAX_LENGTH = 512
+# BATCH_SIZE = 8
+# NUM_EPOCHS = 15
+# LR = 1e-5
+# WEIGHT_DECAY = 0.01
+# WARMUP_RATIO = 0.05
+# rubert-base-case AutoModel train.csv  balanced_accuracy: 0.345815, macro_f1: 0.341168
+# rubert-base-case AutoModel train_paraphrase.csv balanced_accuracy 0.410021, macro_f1: 0.408506
+# rubert-base-cased AutoModel train_paraphrase_2.csv balanced_accuracy: 0.418388, macro_f1: 0.429682
+# rubert-base-cased AutoModel train_paraphrase_3.csv balanced_accuracy: 0.401685, macro_f1: 0.405676
+# rubert-base-case AutoModel train_backtranslate.csv balanced_accuracy: 0.395779, macro_f1: 0.397109
+# rubert-base-cased AutoModel train_backtranslate_2.csv balanced_accuracy: 0.372184, macro_f1: 0.373936
+# rubert-base-cased AutoModel train_augmented.csv balanced_accuracy: 0.426671, macro_f1: 0.426301
+# rubert-base-cased AutoModel train_augmented_2.csv balanced_accuracy: 0.395242, macro_f1: 0.396828
+# rubert-base-cased AutoModel train_augmented_3.csv balanced_accuracy: 0.416660, macro_f1: 0.433876
+      
+# rubert-base-case meanPooling train.csv  balanced_accuracy: 0.353825, macro_f1: 0.357340
+# rubert-base-case meanPooling train_paraphrase.csv balanced_accuracy 0.395913, macro_f1: 0.391975
+# rubert-base-cased meanPooling train_paraphrase_2.csv balanced_accuracy: 0.429026, macro_f1: 0.420598
+# rubert-base-cased meanPooling train_paraphrase_3.csv balanced_accuracy: 0.443284, macro_f1: 0.437885
+# rubert-base-case meanPooling train_backtranslate.csv balanced_accuracy: 0.401737, macro_f1: 0.400306
+# rubert-base-cased meanPooling train_backtranslate_2.csv balanced_accuracy: 0.447853, macro_f1: 0.457282
+# rubert-base-cased meanPooling train_augmented.csv balanced_accuracy: 0.435280, macro_f1: 0.431922
+# rubert-base-cased meanPooling train_augmented_2.csv balanced_accuracy: 0.450676, macro_f1: 0.452683
+       
+# MAX_LENGTH = 512
+# BATCH_SIZE = 4
+# NUM_EPOCHS = 15
+# LR = 1e-5
+# WEIGHT_DECAY = 0.01
+# WARMUP_RATIO = 0.05
+# ruRoberta-large AutoModel train.csv  balanced_accuracy: 0.394214, macro_f1: 0.399566
+# ruRoberta-large AutoModel train_paraphrase.csv balanced_accuracy 0.468766, macro_f1: 0.470790
+# ruRoberta-large AutoModel train_paraphrase_2.csv balanced_accuracy: 0.027778, macro_f1: 0.006495
+# ruRoberta-large AutoModel train_paraphrase_3.csv balanced_accuracy: 0.474551, macro_f1: 0.486725
+# ruRoberta-large AutoModel train_backtranslate.csv balanced_accuracy: 0.119339, macro_f1: 0.111930
+# ruRoberta-large AutoModel train_backtranslate_2.csv balanced_accuracy: 0.416208, macro_f1: 0.426317
+# ruRoberta-large AutoModel train_augmented.csv balanced_accuracy: 0.456992, macro_f1: 0.471013
+# ruRoberta-large AutoModel train_augmented_2.csv balanced_accuracy: 0.247079, macro_f1: 0.242977
+
+# ruRoberta-large meanPooling train.csv  balanced_accuracy: 0.426209, macro_f1: 0.444748
+# ruRoberta-large meanPooling train_paraphrase.csv balanced_accuracy 0.460898, macro_f1: 0.466976
+# ruRoberta-large meanPooling train_paraphrase_2.csv balanced_accuracy: 0.488878, macro_f1: 0.487119
+# ruRoberta-large meanPooling train_paraphrase_3.csv balanced_accuracy: 0.466266, macro_f1: 0.463188
+# ruRoberta-large meanPooling train_backtranslate.csv balanced_accuracy: 0.432684, macro_f1: 0.423993
+# ruRoberta-large meanPooling train_backtranslate_2.csv balanced_accuracy: 0.453921, macro_f1: 0.454833
+# ruRoberta-large meanPooling train_augmented.csv balanced_accuracy: 0.476920, macro_f1: 0.487293
+# ruRoberta-large meanPooling train_augmented_2.csv balanced_accuracy: 0.481015, macro_f1: 0.474783
+
+# ---
+
+python hybrid_vector_build.py \
+  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --finetuned_dir /Users/v.papadyk/ml/mifi-vkr/hybrid/ruroberta_chunk_meanpool_best \
+  --device cpu
+
+python hybrid_classical_models.py \
+  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models
+
+python hybrid_mlp.py \
+  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models \
+  --epochs 25 \
+  --device cpu

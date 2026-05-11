@@ -15,12 +15,12 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 
 
-SEED = 42
+SEED = 234
 
 BATCH_SIZE = 128
-LR = 2e-4
+LR = 1e-4
 PATIENCE = 10
-WEIGHT_DECAY = 2e-2
+WEIGHT_DECAY = 1e-2
 
 HIDDEN_DIM = 1024
 NUM_BLOCKS = 3

@@ -104,6 +104,8 @@ if __name__ == "__main__":
 # rubert-base-cased train_augmented.csv balanced_accuracy: 0.394003, macro_f1: 0.396188
 # rubert-base-cased train_augmented_2.csv balanced_accuracy: 0.361901, macro_f1: 0.364837
 
+# --------------------------------
+
 # MAX_LENGTH = 512
 # BATCH_SIZE = 8
 # NUM_EPOCHS = 15
@@ -119,7 +121,9 @@ if __name__ == "__main__":
 # rubert-base-cased AutoModel train_augmented.csv balanced_accuracy: 0.426671, macro_f1: 0.426301
 # rubert-base-cased AutoModel train_augmented_2.csv balanced_accuracy: 0.395242, macro_f1: 0.396828
 # rubert-base-cased AutoModel train_augmented_3.csv balanced_accuracy: 0.416660, macro_f1: 0.433876
-      
+# rubert-base-cased AutoModel train_augmented_summary.csv balanced_accuracy: 0.223529, macro_f1: 0.228690
+# rubert-base-cased AutoModel train_augmented_summary_combined.csv balanced_accuracy: 0.434526, macro_f1: 0.443603      
+
 # rubert-base-case meanPooling train.csv  balanced_accuracy: 0.353825, macro_f1: 0.357340
 # rubert-base-case meanPooling train_paraphrase.csv balanced_accuracy 0.395913, macro_f1: 0.391975
 # rubert-base-cased meanPooling train_paraphrase_2.csv balanced_accuracy: 0.429026, macro_f1: 0.420598
@@ -169,5 +173,5 @@ python hybrid_classical_models.py \
 python hybrid_mlp.py \
   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models \
-  --epochs 25 \
+  --epochs 40 \
   --device cpu

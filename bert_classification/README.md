@@ -1,4 +1,4 @@
-# bert-classification
+# bert_classification
 
 Пакет для обучения document classifier на базе `ai-forever/ruRoberta-large` с кастомной классификационной головой поверх document embedding. Ключевая часть архитектуры здесь — не только обработка длинных текстов, а именно trainable head вида `dropout -> linear -> GELU -> dropout -> classifier`, которая обучается классифицировать документ целиком по агрегированному представлению текста.
 
@@ -15,7 +15,7 @@
 Структура директории:
 
 ```text
-bert-classification/
+bert_classification/
 ├── __init__.py
 ├── config.py
 ├── utils.py
@@ -170,7 +170,7 @@ Callback, который после каждой эпохи смотрит по�
 
 Поддерживает два режима:
 
-1. **CLI**: `python -m bert-classification.main ...`
+1. **CLI**: `python -m bert_classification.main ...`
 2. **Python API**: импорт `run_from_params(...)` или `run_from_configs(...)`
 
 Внутри файла:
@@ -228,10 +228,10 @@ output_dir/
 Пример запуска:
 
 ```bash
-python -m bert-classification.main \
+python -m bert_classification.main \
   --train-file /path/to/train_augmented.csv \
   --test-file /path/to/test.csv \
-  --output-dir /path/to/saved_models/bert-classification_meanpool \
+  --output-dir /path/to/saved_models/bert_classification_meanpool \
   --num-epochs 20 \
   --checkpoint-every-n-epochs 3
 ```
@@ -252,13 +252,13 @@ python -m bert-classification.main \
 Если на сервере есть глобальный `main.py`, можно не собирать CLI-команду, а импортировать пакет напрямую:
 
 ```python
-from bert-classification.main import run_from_params
+from bert_classification.main import run_from_params
 
 
 components, eval_metrics = run_from_params(
     train_file="/path/to/train_augmented.csv",
     test_file="/path/to/test.csv",
-    output_dir="/path/to/saved_models/bert-classification_meanpool",
+    output_dir="/path/to/saved_models/bert_classification_meanpool",
     num_epochs=20,
     checkpoint_every_n_epochs=3,
     batch_size=1,
@@ -288,7 +288,7 @@ components, eval_metrics = run_from_params(
 Базовая логика восстановления такая:
 
 ```python
-from bert-classification.training import load_recovery_checkpoint
+from bert_classification.training import load_recovery_checkpoint
 
 ckpt, start_epoch = load_recovery_checkpoint(
     checkpoint_path="/path/to/output_dir/checkpoint_epoch_6.pt",

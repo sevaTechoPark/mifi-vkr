@@ -50,7 +50,7 @@ def build_arg_parser():
 
     parser.add_argument("--train-file", required=True)
     parser.add_argument("--test-file", required=True)
-    parser.add_argument("--output-dir", default="./saved_models/bert-classification")
+    parser.add_argument("--output-dir", default="./saved_models/bert_classification")
 
     parser.add_argument("--model-name", default="ai-forever/ruRoberta-large")
     parser.add_argument("--max-length", type=int, default=512)
@@ -95,7 +95,7 @@ def run_from_configs(
 def run_from_params(
     train_file: str,
     test_file: str,
-    output_dir: str = "./saved_models/bert-classification",
+    output_dir: str = "./saved_models/bert_classification",
     model_name: str = "ai-forever/ruRoberta-large",
     max_length: int = 512,
     stride: int = 256,

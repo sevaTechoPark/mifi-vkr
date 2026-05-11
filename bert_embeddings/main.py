@@ -183,7 +183,7 @@ def run_from_params(
         num_train_epochs=cfg.num_train_epochs,
         warmup_ratio=cfg.warmup_ratio,
         logging_steps=cfg.logging_steps,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="no",
         report_to="none",
         fp16=cfg.fp16,

@@ -183,6 +183,6 @@ if __name__ == "__main__":
 # ruRoberta-large AutoModel train_augmented_summarized.csv balanced_accuracy: 0.333970, macro_f1: 0.332734
 # ruRoberta-large AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.475647, macro_f1: 0.468746
 # ruRoberta-large meanPooling train_augmented_summarized.csv balanced_accuracy: 0.379292, macro_f1: 0.384017
-# ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
-
+# ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.446830, macro_f1: 0.466032
+       
 # IlyaGusev/mbart_ru_sum_gazeta

@@ -20,7 +20,7 @@ class TrainConfig:
     lr_head: float = 3e-5
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
-    early_stopping_patience: int = 2
+    early_stopping_patience: int = 3
     checkpoint_every_n_epochs: int = 3
     seed: int = 42
     dataloader_num_workers: int = 2

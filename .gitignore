@@ -7,4 +7,8 @@ __pycache__/
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
 .DS_Store
+
 hybrid/ruroberta_chunk_meanpool_best
+hybrid/data
+hybrid/models
+bert_embeddings/best_model

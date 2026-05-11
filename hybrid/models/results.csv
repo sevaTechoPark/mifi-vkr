@@ -1,3 +1,0 @@
-model,balanced_accuracy,macro_f1
-linear_svc,0.340786,0.321917
-logreg,0.390829,0.389622

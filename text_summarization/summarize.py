@@ -1,6 +1,6 @@
 import torch
 import pandas as pd
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from .config import MAX_INPUT_LENGTH, MAX_SUMMARY_LENGTH, MIN_SUMMARY_LENGTH, BATCH_SIZE, TEXT_COLUMN
 
 def summarize_batch(texts, tokenizer, model, device,

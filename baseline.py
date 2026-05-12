@@ -15,8 +15,9 @@ from sklearn.metrics import (
 )
 from pathlib import Path
 
-TRAIN_PATH = "data/train_augmented_3.csv"
+TRAIN_PATH = "data/train_augmented_original_plus_summary_3.csv"
 # train.csv / train_paraphrase.csv / train_backtranslate.csv / train_augmented.csv
+# train_augmented_summarized.csv / train_augmented_original_plus_summary.csv
 TEST_PATH  = "data/test.csv"
 TEXT_COL = "text"
 LABEL_COL = "label"
@@ -86,6 +87,13 @@ if __name__ == "__main__":
 # baseline train_augmented.csv balanced_accuracy: 0.463, macro_f1: 0.472
 # baseline train_augmented_2.csv balanced_accuracy: 0.467, macro_f1: 0.477
 # baseline train_augmented_3.csv balanced_accuracy: 0.463, macro_f1: 0.472
+
+# baseline train_augmented_summarized.csv balanced_accuracy: 0.338, macro_f1: 0.361
+# baseline train_augmented_original_plus_summary.csv balanced_accuracy: 0.463, macro_f1: 0.479
+# baseline train_augmented_summarized_2.csv balanced_accuracy: 0.026, macro_f1: 0.007
+# baseline train_augmented_original_plus_summary_2.csv balanced_accuracy: 0.457, macro_f1: 0.47
+# baseline train_augmented_summarized_3.csv balanced_accuracy: 0.364, macro_f1: 0.376
+# baseline train_augmented_original_plus_summary_3.csv balanced_accuracy: 0.457, macro_f1: 0.47
 
 # MAX_LENGTH = 256
 # BATCH_SIZE = 16

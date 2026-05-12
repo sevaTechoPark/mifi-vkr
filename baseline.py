@@ -176,20 +176,20 @@ if __name__ == "__main__":
 
 # ---- Косинусное сходство
 
-python -m cosine_similarity_classification.main \
-  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
-  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-  --method centroid
+# python -m cosine_similarity_classification.main \
+#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
+#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+#   --method centroid
 
-python -m cosine_similarity_classification.main \
-  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
-  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-  --method nearest
+# python -m cosine_similarity_classification.main \
+#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
+#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+#   --method nearest
 
-# centroid train_augmented: balanced_accuracy: ?, macro_f1: ?
-# nearest train_augmented: balanced_accuracy: ?, macro_f1: ?
+# centroid train_augmented: balanced_accuracy: 0.149607, macro_f1: 0.121122
+# nearest train_augmented: balanced_accuracy: 0.246947, macro_f1: 0.250962
 
 # ---- Суммаризация
 
@@ -204,21 +204,22 @@ python -m cosine_similarity_classification.main \
 # ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.446830, macro_f1: 0.466032
        
 # IlyaGusev/mbart_ru_sum_gazeta:
-# rubert-base-cased AutoModel train_augmented_summarized.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-cased AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-case meanPooling train_augmented_summarized.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-case meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
+# rubert-base-cased AutoModel train_augmented_summarized.csv balanced_accuracy: 0.027778, macro_f1: 0.001598
+# rubert-base-cased AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.398335, macro_f1: 0.399363
+# rubert-base-case meanPooling train_augmented_summarized.csv balanced_accuracy: 0.034722, macro_f1: 0.001750
+# rubert-base-case meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.404449, macro_f1: 0.402429
 # ruRoberta-large AutoModel train_augmented_summarized.csv balanced_accuracy: 0.023641, macro_f1: 0.005958
 # ruRoberta-large AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.439066, macro_f1: 0.435186
 # ruRoberta-large meanPooling train_augmented_summarized.csv balanced_accuracy: 0.027778, macro_f1: 0.006495
 # ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.027778, macro_f1: 0.006495
-               
+                                                 
 # d0rj/rut5-base-summ:
-# rubert-base-cased AutoModel train_augmented_summarized.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-cased AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-case meanPooling train_augmented_summarized.csv balanced_accuracy: ?, macro_f1: ?
-# rubert-base-case meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
+# rubert-base-cased AutoModel train_augmented_summarized.csv balanced_accuracy: 0.131789, macro_f1: 0.116513
+# rubert-base-cased AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.432433, macro_f1: 0.440640              
+# rubert-base-case meanPooling train_augmented_summarized.csv balanced_accuracy: 0.211926, macro_f1: 0.194112
+# rubert-base-case meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.450357, macro_f1: 0.441125
 # ruRoberta-large AutoModel train_augmented_summarized.csv balanced_accuracy: 0.317597, macro_f1: 0.289931
-# ruRoberta-large AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
+# ruRoberta-large AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.454132, macro_f1: 0.465529
 # ruRoberta-large meanPooling train_augmented_summarized.csv balanced_accuracy: 0.347784, macro_f1: 0.335338
-# ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: ?, macro_f1: ?
+# ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.027778, macro_f1: 0.006495
+            

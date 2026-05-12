@@ -9,13 +9,18 @@ class MLMConfig:
     max_length: int = 512
     mlm_probability: float = 0.15
     train_batch_size: int = 4
-    learning_rate: float = 5e-5
+    eval_batch_size: int = 4
+    learning_rate: float = 2e-5
     weight_decay: float = 0.01
     num_train_epochs: int = 15
-    warmup_ratio: float = 0.05
+    warmup_ratio: float = 0.10
     logging_steps: int = 100
     fp16: bool = True
     seed: int = 42
+    val_size: float = 0.02
+    checkpoint_every_n_epochs: int = 3
+    # early stopping включён по умолчанию
+    early_stopping_patience: int | None = 3
 
 
 @dataclass
@@ -29,6 +34,7 @@ class EmbeddingConfig:
     normalize_chunks: bool = True
     normalize_document: bool = True
     add_global_chunk: bool = True
+    base_model_name: str = "ai-forever/ruRoberta-large"
 
 
 def ensure_dir(path: str | Path) -> Path:

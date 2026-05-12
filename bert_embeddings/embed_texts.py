@@ -1,45 +1,73 @@
 import argparse
+from dataclasses import fields, replace
+
 import numpy as np
 import pandas as pd
 
+from bert_embeddings.config import EmbeddingConfig
 from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 
 
+def build_arg_parser() -> argparse.ArgumentParser:
+    """
+    CLI под EmbeddingConfig:
+      --input-csv, --output-npy, --output-csv, --model-dir
+      и по одному аргументу для каждого НЕ-булевого поля EmbeddingConfig:
+      --max-length, --chunk-size, --pooling, ...
+    """
+    parser = argparse.ArgumentParser(
+        description="Embed texts with fine-tuned ruRoberta"
+    )
+
+    parser.add_argument("--input-csv", type=str, required=True)
+    parser.add_argument("--output-npy", type=str, required=True)
+    parser.add_argument("--output-csv", type=str, default=None)
+    parser.add_argument("--model-dir", type=str, required=True)
+
+    defaults = {f.name: f.default for f in fields(EmbeddingConfig)}
+    for f in fields(EmbeddingConfig):
+        default = defaults[f.name]
+        # булевые поля (normalize_chunks, normalize_document, add_global_chunk) не даём как type=bool
+        if isinstance(default, bool):
+            continue
+        arg_name = f"--{f.name.replace('_', '-')}"
+        arg_type = type(default)
+        parser.add_argument(arg_name, type=arg_type, default=None)
+
+    return parser
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input_csv", type=str, required=True)
-    parser.add_argument("--output_npy", type=str, required=True)
-    parser.add_argument("--output_csv", type=str, default=None)
-    parser.add_argument("--model_dir", type=str, required=True)
-    parser.add_argument("--base_model_name", type=str, default="ai-forever/ruRoberta-large")
-    parser.add_argument("--text_col", type=str, default="text")
-    parser.add_argument("--max_length", type=int, default=512)
-    parser.add_argument("--chunk_size", type=int, default=448)
-    parser.add_argument("--chunk_overlap", type=int, default=96)
-    parser.add_argument("--pooling", type=str, choices=["mean", "cls", "max", "mean_max"], default="mean_max")
-    parser.add_argument("--chunk_aggregation", type=str, choices=["mean", "max", "mean_max"], default="mean_max")
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--disable_global_chunk", action="store_true")
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     df = pd.read_csv(args.input_csv)
-    df = df[[args.text_col]].dropna().copy()
-    df[args.text_col] = df[args.text_col].astype(str).str.strip()
-    df = df[df[args.text_col] != ""].reset_index(drop=True)
+    # сейчас считаем, что колонка с текстом называется "text"
+    df = df[["text"]].dropna().copy()
+    df["text"] = df["text"].astype(str).str.strip()
+    df = df[df["text"] != ""].reset_index(drop=True)
+
+    # базовая конфигурация
+    cfg = EmbeddingConfig()
+
+    # переопределения из CLI
+    overrides = {}
+    for f in fields(EmbeddingConfig):
+        if not hasattr(args, f.name):
+            continue
+        val = getattr(args, f.name)
+        if val is not None:
+            overrides[f.name] = val
+
+    if overrides:
+        cfg = replace(cfg, **overrides)
 
     embedder = LongTextRobertaEmbedder(
         model_dir=args.model_dir,
-        base_model_name=args.base_model_name,
-        max_length=args.max_length,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
-        pooling=args.pooling,
-        chunk_aggregation=args.chunk_aggregation,
-        batch_size=args.batch_size,
-        add_global_chunk=not args.disable_global_chunk,
+        cfg=cfg,
     )
 
-    embs, chunk_counts = embedder.encode(df[args.text_col].tolist(), return_chunk_counts=True)
+    embs, chunk_counts = embedder.encode(df["text"].tolist(), return_chunk_counts=True)
     np.save(args.output_npy, embs)
     print(f"Saved embeddings to: {args.output_npy}")
 

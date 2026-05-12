@@ -3,6 +3,8 @@ import torch
 from pathlib import Path
 from transformers import AutoTokenizer, RobertaConfig, RobertaModel
 
+from bert_embeddings.config import EmbeddingConfig
+
 
 def mean_pooling(last_hidden_state, attention_mask):
     mask = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
@@ -23,29 +25,39 @@ class LongTextRobertaEmbedder:
     def __init__(
         self,
         model_dir,
-        base_model_name="ai-forever/ruRoberta-large",
-        max_length=512,
-        chunk_size=448,
-        chunk_overlap=96,
-        pooling="mean_max",
-        chunk_aggregation="mean_max",
-        batch_size=8,
-        normalize_chunks=True,
-        normalize_document=True,
-        add_global_chunk=True,
-        device=None,
+        cfg: EmbeddingConfig | None = None,
+        # Отдельные параметры для обратной совместимости и явного переопределения
+        base_model_name: str | None = None,
+        max_length: int | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        pooling: str | None = None,
+        chunk_aggregation: str | None = None,
+        batch_size: int | None = None,
+        normalize_chunks: bool | None = None,
+        normalize_document: bool | None = None,
+        add_global_chunk: bool | None = None,
+        device: str | None = None,
     ):
+        if cfg is None:
+            cfg = EmbeddingConfig()
+
+        # Явные аргументы перекрывают cfg
+        self.base_model_name   = base_model_name   or cfg.base_model_name
+        self.max_length        = max_length        or cfg.max_length
+        self.pooling           = pooling           or cfg.pooling
+        self.chunk_aggregation = chunk_aggregation or cfg.chunk_aggregation
+        self.batch_size        = batch_size        or cfg.batch_size
+        self.normalize_chunks  = normalize_chunks  if normalize_chunks  is not None else cfg.normalize_chunks
+        self.normalize_document= normalize_document if normalize_document is not None else cfg.normalize_document
+        self.add_global_chunk  = add_global_chunk  if add_global_chunk  is not None else cfg.add_global_chunk
+
+        raw_chunk_size    = chunk_size    or cfg.chunk_size
+        raw_chunk_overlap = chunk_overlap or cfg.chunk_overlap
+        self.chunk_size    = min(raw_chunk_size, self.max_length - 2)
+        self.chunk_overlap = min(raw_chunk_overlap, max(0, self.chunk_size // 2))
+
         self.model_dir = Path(model_dir)
-        self.base_model_name = base_model_name
-        self.max_length = max_length
-        self.chunk_size = min(chunk_size, max_length - 2)
-        self.chunk_overlap = min(chunk_overlap, max(0, self.chunk_size // 2))
-        self.pooling = pooling
-        self.chunk_aggregation = chunk_aggregation
-        self.batch_size = batch_size
-        self.normalize_chunks = normalize_chunks
-        self.normalize_document = normalize_document
-        self.add_global_chunk = add_global_chunk
 
         if device is None:
             if torch.cuda.is_available():
@@ -56,18 +68,22 @@ class LongTextRobertaEmbedder:
                 device = "cpu"
         self.device = device
 
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-        cfg = RobertaConfig.from_pretrained(base_model_name)
-        self.model = RobertaModel.from_pretrained(base_model_name, config=cfg)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name)
+        roberta_cfg = RobertaConfig.from_pretrained(self.base_model_name)
+        self.model = RobertaModel.from_pretrained(self.base_model_name, config=roberta_cfg)
 
         weights_path = self.model_dir / "pytorch_model.bin"
         if weights_path.exists():
             state_dict = torch.load(weights_path, map_location="cpu")
-            filtered = {k.replace("roberta.", "", 1): v for k, v in state_dict.items() if k.startswith("roberta.")}
+            filtered = {
+                k.replace("roberta.", "", 1): v
+                for k, v in state_dict.items()
+                if k.startswith("roberta.")
+            }
             missing, unexpected = self.model.load_state_dict(filtered, strict=False)
             print("Loaded encoder weights.")
-            print("Missing keys:", len(missing))
-            print("Unexpected keys:", len(unexpected))
+            print(f"Missing keys: {len(missing)}")
+            print(f"Unexpected keys: {len(unexpected)}")
         else:
             raise FileNotFoundError(f"Weights not found: {weights_path}")
 
@@ -98,7 +114,11 @@ class LongTextRobertaEmbedder:
         if self.add_global_chunk and len(token_ids) > self.chunk_size:
             head = token_ids[: self.chunk_size // 2]
             tail = token_ids[-(self.chunk_size - len(head)):]
-            global_piece = [self.tokenizer.cls_token_id] + (head + tail)[: self.max_length - 2] + [self.tokenizer.sep_token_id]
+            global_piece = (
+                [self.tokenizer.cls_token_id]
+                + (head + tail)[: self.max_length - 2]
+                + [self.tokenizer.sep_token_id]
+            )
             chunks.append(global_piece)
 
         return chunks
@@ -106,9 +126,8 @@ class LongTextRobertaEmbedder:
     @torch.no_grad()
     def _encode_chunk_batch(self, batch_token_ids):
         max_len = max(len(x) for x in batch_token_ids)
-        input_ids = []
-        attention_mask = []
         pad_id = self.tokenizer.pad_token_id
+        input_ids, attention_mask = [], []
 
         for ids in batch_token_ids:
             pad_len = max_len - len(ids)
@@ -155,8 +174,7 @@ class LongTextRobertaEmbedder:
             chunk_ids = self._chunk_token_ids(text)
             chunk_counts.append(len(chunk_ids))
             if not chunk_ids:
-                vec = np.zeros(hidden, dtype=np.float32)
-                doc_embeddings.append(vec)
+                doc_embeddings.append(np.zeros(hidden, dtype=np.float32))
                 continue
 
             chunk_embs = []
@@ -164,8 +182,7 @@ class LongTextRobertaEmbedder:
                 batch = chunk_ids[i:i + self.batch_size]
                 chunk_embs.append(self._encode_chunk_batch(batch))
             chunk_embs = np.vstack(chunk_embs)
-            doc_emb = self._aggregate_chunks(chunk_embs)
-            doc_embeddings.append(doc_emb)
+            doc_embeddings.append(self._aggregate_chunks(chunk_embs))
 
         embs = np.vstack(doc_embeddings)
         if return_chunk_counts:

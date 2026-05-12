@@ -1,6 +1,5 @@
 import os
 import argparse
-import joblib
 import pandas as pd
 import scipy.sparse as sp
 from sklearn.metrics import balanced_accuracy_score, f1_score
@@ -13,21 +12,14 @@ def eval_model(model, X_test, y_test):
     return {
         "balanced_accuracy": round(balanced_accuracy_score(y_test, pred), 6),
         "macro_f1": round(f1_score(y_test, pred, average="macro", zero_division=0), 6),
-    }, pred
+    }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--vecdir", required=True)
-    parser.add_argument("--outdir", required=True)
-    args = parser.parse_args()
-
-    os.makedirs(args.outdir, exist_ok=True)
-
-    X_train = sp.load_npz(os.path.join(args.vecdir, "X_train_hybrid.npz"))
-    X_test = sp.load_npz(os.path.join(args.vecdir, "X_test_hybrid.npz"))
-    y_train = pd.read_csv(os.path.join(args.vecdir, "y_train.csv")).iloc[:, 0].astype(str)
-    y_test = pd.read_csv(os.path.join(args.vecdir, "y_test.csv")).iloc[:, 0].astype(str)
+def run_classical(vecdir):
+    X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz"))
+    X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz"))
+    y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
+    y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
 
     models = {
         "linear_svc": LinearSVC(class_weight="balanced", max_iter=5000),
@@ -37,13 +29,23 @@ def main():
     results = []
     for name, model in models.items():
         model.fit(X_train, y_train)
-        metrics, pred = eval_model(model, X_test, y_test)
+        metrics = eval_model(model, X_test, y_test)
         results.append({"model": name, **metrics})
-        joblib.dump(model, os.path.join(args.outdir, f"{name}.joblib"))
-        pd.Series(pred).to_csv(os.path.join(args.outdir, f"{name}_pred.csv"), index=False)
-        print(name, metrics)
+        print(f"{name}: {metrics}")
 
-    pd.DataFrame(results).to_csv(os.path.join(args.outdir, "results.csv"), index=False)
+    return results
+
+
+def build_argparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vecdir", required=True)
+    return parser
+
+
+def main():
+    parser = build_argparser()
+    args = parser.parse_args()
+    run_classical(args.vecdir)
 
 
 if __name__ == "__main__":

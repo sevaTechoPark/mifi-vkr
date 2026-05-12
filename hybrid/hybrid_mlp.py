@@ -1,7 +1,6 @@
 import os
 import json
 import argparse
-import joblib
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -143,21 +142,12 @@ def evaluate(model, loader, device):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--vecdir", required=True)
-    parser.add_argument("--outdir", required=True)
-    parser.add_argument("--epochs", type=int, default=25)
-    parser.add_argument("--device", default="cpu")
-    args = parser.parse_args()
+def run_mlp(vecdir, epochs=25, device="cpu"):
+    X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz")).astype(np.float32)
+    X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz")).astype(np.float32)
 
-    os.makedirs(args.outdir, exist_ok=True)
-
-    X_train = sp.load_npz(os.path.join(args.vecdir, "X_train_hybrid.npz")).astype(np.float32)
-    X_test = sp.load_npz(os.path.join(args.vecdir, "X_test_hybrid.npz")).astype(np.float32)
-
-    y_train = pd.read_csv(os.path.join(args.vecdir, "y_train.csv")).iloc[:, 0].astype(str)
-    y_test = pd.read_csv(os.path.join(args.vecdir, "y_test.csv")).iloc[:, 0].astype(str)
+    y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
+    y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
 
     le = LabelEncoder()
     y_train_enc = le.fit_transform(y_train)
@@ -176,9 +166,9 @@ def main():
     train_ds = DenseDataset(X_train, y_train_enc)
     test_ds = DenseDataset(X_test, y_test_enc)
 
-    device = torch.device(args.device if torch.cuda.is_available() and args.device != "cpu" else "cpu")
+    device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
     use_cuda = (device.type == "cuda")
-    pin = True if use_cuda else False
+    pin = bool(use_cuda)
 
     train_loader = DataLoader(
         train_ds,
@@ -220,10 +210,9 @@ def main():
     best_f1 = -1.0
     best_metrics = None
     best_epoch = -1
-    best_state = None
     no_improve = 0
 
-    for epoch in range(args.epochs):
+    for epoch in range(epochs):
         model.train()
         epoch_losses = []
 
@@ -259,19 +248,12 @@ def main():
             best_f1 = metrics["macro_f1"]
             best_metrics = metrics
             best_epoch = epoch + 1
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             no_improve = 0
         else:
             no_improve += 1
             if no_improve >= PATIENCE:
                 print(f"Early stopping at epoch {epoch+1}")
                 break
-
-    if best_state is not None:
-        model.load_state_dict(best_state)
-        torch.save(model.state_dict(), os.path.join(args.outdir, "mlp_best.pt"))
-
-    joblib.dump(le, os.path.join(args.outdir, "label_encoder.joblib"))
 
     results = {
         "best_epoch": best_epoch,
@@ -288,13 +270,27 @@ def main():
         "focal_gamma": FOCAL_GAMMA,
         "label_smoothing": LABEL_SMOOTHING,
         "device": str(device),
+        "num_classes": int(len(le.classes_)),
+        "input_dim": int(X_train.shape[1]),
     }
 
-    with open(os.path.join(args.outdir, "results.json"), "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
     print("\nBEST RESULT")
-    print(results)
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+    return results
+
+
+def build_argparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vecdir", required=True)
+    parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument("--device", default="cpu")
+    return parser
+
+
+def main():
+    parser = build_argparser()
+    args = parser.parse_args()
+    run_mlp(args.vecdir, epochs=args.epochs, device=args.device)
 
 
 if __name__ == "__main__":

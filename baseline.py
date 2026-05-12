@@ -157,47 +157,52 @@ if __name__ == "__main__":
                  
 # bert-classification train_backtranslate_2.csv balanced_accuracy: 0.441557, macro_f1: 0.450440
 # bert-classification train_backtranslate_3.csv balanced_accuracy: 0.388507, macro_f1: 0.382487
-
+# bert-classification train_augmented_3 balanced_accuracy: 0.463967, macro_f1: 0.470460
+           
 # --- Композитный вектор
 
-# python hybrid_vector_build.py \
-#   --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
-#   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-#   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-#   --finetuned_dir /Users/v.papadyk/ml/mifi-vkr/hybrid/ruroberta_chunk_meanpool_best \
-#   --device cpu
+python hybrid_vector_build.py \
+  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --finetuned_dir /Users/v.papadyk/ml/mifi-vkr/hybrid/ruroberta_chunk_meanpool_best \
+  --device cpu
 
-# python hybrid_classical_models.py \
-#   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-#   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models
+python hybrid_classical_models.py \
+  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models
 
 # linear_svc {'balanced_accuracy': 0.340786, 'macro_f1': 0.321917}
 # logreg {'balanced_accuracy': 0.390829, 'macro_f1': 0.389622}
 
-# python hybrid_mlp.py \
-#   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-#   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models \
-#   --epochs 40 \
-#   --device cpu
+python hybrid_mlp.py \
+  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models \
+  --epochs 40 \
+  --device cpu
 
 # balanced_accuracy: 0.447552, macro_f1: 0.433175
 
 # ---- Косинусное сходство
 
-# python -m cosine_similarity_classification.main \
-#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
-#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-#   --method centroid
+python -m cosine_similarity_classification.main \
+  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+  --method centroid
 
-# python -m cosine_similarity_classification.main \
-#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented.csv \
-#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-#   --method nearest
+python -m cosine_similarity_classification.main \
+  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+  --method nearest
 
 # centroid train_augmented: balanced_accuracy: 0.149607, macro_f1: 0.121122
+# centroid train_augmented_3_v1: balanced_accuracy: 0.118086, macro_f1: 0.082073
+# centroid train_augmented_3_v2: balanced_accuracy: ?, macro_f1: ?
 # nearest train_augmented: balanced_accuracy: 0.246947, macro_f1: 0.250962
+# nearest train_augmented_3_v1: balanced_accuracy: 0.238407, macro_f1: 0.217342
+# nearest train_augmented_3_v2: balanced_accuracy: ?, macro_f1: ?
 
 # ---- Суммаризация
 

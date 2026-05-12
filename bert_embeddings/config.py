@@ -19,8 +19,7 @@ class MLMConfig:
     seed: int = 42
     val_size: float = 0.02
     checkpoint_every_n_epochs: int = 3
-    # early stopping включён по умолчанию
-    early_stopping_patience: int | None = 3
+    early_stopping_patience: int = 3  # всегда включён, передаётся в нативный EarlyStoppingCallback
 
 
 @dataclass

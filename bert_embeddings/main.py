@@ -36,6 +36,11 @@ def save_encoder_only_from_mlm(model, save_dir, meta=None):
 
 
 class CustomMLMCheckpointCallback(TrainerCallback):
+    """
+    Сохраняет encoder-only чекпоинты каждые N эпох.
+    best_model сохраняется в on_train_end, когда Trainer уже загрузил
+    лучшие веса через load_best_model_at_end=True.
+    """
     def __init__(self, output_dir, save_every_n_epochs=3, tokenizer=None, meta_fn=None):
         self.output_dir = Path(output_dir)
         self.checkpoints_dir = ensure_dir(self.output_dir / "checkpoints")
@@ -45,20 +50,6 @@ class CustomMLMCheckpointCallback(TrainerCallback):
         self.best_eval_loss = float("inf")
         self.best_epoch = None
         self.meta_fn = meta_fn
-
-    def _save_best_model(self, model, eval_loss, epoch):
-        if self.best_model_dir.exists():
-            shutil.rmtree(self.best_model_dir)
-        self.best_model_dir.mkdir(parents=True, exist_ok=True)
-        meta = (self.meta_fn() if self.meta_fn else {})
-        meta.update({
-            "type": "mlm_domain_encoder_best",
-            "best_eval_loss": eval_loss,
-            "best_epoch": epoch,
-        })
-        save_encoder_only_from_mlm(model, self.best_model_dir, meta=meta)
-        if self.tokenizer:
-            self.tokenizer.save_pretrained(self.best_model_dir)
 
     def _save_epoch_checkpoint(self, model, epoch):
         ckpt_dir = self.checkpoints_dir / f"epoch_{epoch:03d}"
@@ -72,17 +63,41 @@ class CustomMLMCheckpointCallback(TrainerCallback):
     def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
         if state.epoch is None or metrics is None:
             return control
-
         epoch_num = int(round(state.epoch))
         eval_loss = metrics.get("eval_loss")
 
+        # отслеживаем лучшую эпоху (для метрик), но НЕ сохраняем веса здесь
         if eval_loss is not None and eval_loss < self.best_eval_loss:
             self.best_eval_loss = eval_loss
             self.best_epoch = epoch_num
-            self._save_best_model(model, eval_loss, epoch_num)
 
         if epoch_num % self.save_every_n_epochs == 0:
             self._save_epoch_checkpoint(model, epoch_num)
+
+        return control
+
+    def on_train_end(self, args, state, control, model=None, **kwargs):
+        """
+        Вызывается после trainer.train().
+        К этому моменту load_best_model_at_end уже загрузил лучшие веса в model.
+        Сохраняем их как encoder-only best_model.
+        """
+        if model is None:
+            return control
+
+        if self.best_model_dir.exists():
+            shutil.rmtree(self.best_model_dir)
+        self.best_model_dir.mkdir(parents=True, exist_ok=True)
+
+        meta = (self.meta_fn() if self.meta_fn else {})
+        meta.update({
+            "type": "mlm_domain_encoder_best",
+            "best_eval_loss": self.best_eval_loss,
+            "best_epoch": self.best_epoch,
+        })
+        save_encoder_only_from_mlm(model, self.best_model_dir, meta=meta)
+        if self.tokenizer:
+            self.tokenizer.save_pretrained(self.best_model_dir)
 
         return control
 
@@ -97,7 +112,7 @@ def run_from_params(
     """
     Дефолты живут только в MLMConfig (config.py).
 
-    Переопределение через kwargs (для вызова из Python):
+    Переопределение через kwargs:
         run_from_params(..., num_epochs=40, learning_rate=2e-5)
 
     Или через готовый cfg:
@@ -106,7 +121,7 @@ def run_from_params(
     Алиасы kwargs для обратной совместимости:
         num_epochs                → num_train_epochs
         batch_size                → train_batch_size
-        checkpoint_every_n_epochs → отдельный аргумент (не поле MLMConfig)
+        checkpoint_every_n_epochs — отдельный аргумент (не поле MLMConfig)
     """
     if cfg is None:
         cfg = MLMConfig()
@@ -114,7 +129,6 @@ def run_from_params(
     checkpoint_every = cfg.checkpoint_every_n_epochs
 
     if kwargs:
-        # алиасы
         if "num_epochs" in kwargs:
             kwargs["num_train_epochs"] = kwargs.pop("num_epochs")
         if "batch_size" in kwargs:
@@ -161,12 +175,6 @@ def run_from_params(
     def build_meta():
         return {k: getattr(cfg, k) for k in MLMConfig.__dataclass_fields__}
 
-    # early stopping по умолчанию включён, если patience > 0
-    use_early_stopping = (
-        cfg.early_stopping_patience is not None
-        and cfg.early_stopping_patience > 0
-    )
-
     training_args = TrainingArguments(
         output_dir=str(output_dir / "_trainer_tmp"),
         per_device_train_batch_size=cfg.train_batch_size,
@@ -177,31 +185,21 @@ def run_from_params(
         warmup_ratio=cfg.warmup_ratio,
         logging_steps=cfg.logging_steps,
         eval_strategy="epoch",
-        save_strategy="epoch" if use_early_stopping else "no",
-        load_best_model_at_end=use_early_stopping,
-        metric_for_best_model="eval_loss" if use_early_stopping else None,
-        greater_is_better=False if use_early_stopping else None,
+        save_strategy="epoch",               # нужно для load_best_model_at_end
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="none",
         fp16=cfg.fp16,
         seed=cfg.seed,
     )
 
-    callbacks = [
-        CustomMLMCheckpointCallback(
-            output_dir=output_dir,
-            save_every_n_epochs=checkpoint_every,
-            tokenizer=tokenizer,
-            meta_fn=build_meta,
-        )
-    ]
-    if use_early_stopping:
-        callbacks.append(
-            EarlyStoppingCallback(
-                early_stopping_patience=cfg.early_stopping_patience
-            )
-        )
-
-    checkpoint_callback = callbacks[0]
+    checkpoint_callback = CustomMLMCheckpointCallback(
+        output_dir=output_dir,
+        save_every_n_epochs=checkpoint_every,
+        tokenizer=tokenizer,
+        meta_fn=build_meta,
+    )
 
     trainer = Trainer(
         model=model,
@@ -209,7 +207,12 @@ def run_from_params(
         train_dataset=train_ds,
         eval_dataset=valid_ds,
         data_collator=data_collator,
-        callbacks=callbacks,
+        callbacks=[
+            checkpoint_callback,
+            EarlyStoppingCallback(
+                early_stopping_patience=cfg.early_stopping_patience
+            ),
+        ],
     )
 
     trainer.train()

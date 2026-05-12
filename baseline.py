@@ -161,27 +161,30 @@ if __name__ == "__main__":
            
 # --- Композитный вектор
 
-python hybrid_vector_build.py \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+python -m hybrid.main build \
+  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --finetuned_dir /Users/v.papadyk/ml/mifi-vkr/hybrid/ruroberta_chunk_meanpool_best \
+  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu
 
-python hybrid_classical_models.py \
-  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models
+python -m hybrid.main classical \
+  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec
 
+# train_augmented
 # linear_svc {'balanced_accuracy': 0.340786, 'macro_f1': 0.321917}
 # logreg {'balanced_accuracy': 0.390829, 'macro_f1': 0.389622}
+# train_augmented_3
 
-python hybrid_mlp.py \
+python -m hybrid.main mlp \
   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/models \
   --epochs 40 \
   --device cpu
 
+# train_augmented
 # balanced_accuracy: 0.447552, macro_f1: 0.433175
+# train_augmented_3
+
 
 # ---- Косинусное сходство
 

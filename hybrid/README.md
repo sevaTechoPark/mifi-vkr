@@ -276,7 +276,7 @@ python -m hybrid.main mlp \
 
 ```bash
 python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
   --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \

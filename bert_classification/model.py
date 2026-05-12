@@ -50,8 +50,10 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
             label2id=label2id,
             output_hidden_states=False,
         )
+
         self.roberta = RobertaModel.from_pretrained(model_cfg.model_name, config=self.config)
         self.roberta.gradient_checkpointing_enable()
+        self.roberta.config.use_cache = False
 
         hidden_size = self.config.hidden_size
 
@@ -59,6 +61,7 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
         self.fc1 = nn.Linear(hidden_size, hidden_size)
         self.act = nn.GELU()
         self.dropout2 = nn.Dropout(model_cfg.head_dropout)
+        self.norm = nn.LayerNorm(hidden_size)
         self.classifier = nn.Linear(hidden_size, num_labels)
 
         if class_weights is not None:
@@ -106,6 +109,7 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
         x = self.dropout1(doc_embedding)
         x = self.fc1(x)
         x = self.act(x)
+        x = self.norm(x)
         x = self.dropout2(x)
         logits = self.classifier(x)
 

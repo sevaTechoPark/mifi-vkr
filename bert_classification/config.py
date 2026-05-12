@@ -7,21 +7,21 @@ class ModelConfig:
     max_length: int = 512
     stride: int = 256
     max_chunks: int = 6
-    head_dropout: float = 0.3
-    label_smoothing: float = 0.05
+    head_dropout: float = 0.4
+    label_smoothing: float = 0.02
 
 
 @dataclass
 class TrainConfig:
     batch_size: int = 1
     grad_accum_steps: int = 8
-    num_epochs: int = 20
-    lr_encoder: float = 1.2e-5
-    lr_head: float = 3e-5
-    weight_decay: float = 0.01
-    warmup_ratio: float = 0.1
+    num_epochs: int = 16
+    lr_encoder: float = 8e-6
+    lr_head: float = 2e-5
+    weight_decay: float = 0.02
+    warmup_steps: int = 150
     early_stopping_patience: int = 3
-    checkpoint_every_n_epochs: int = 3
+    checkpoint_every_n_epochs: int = 4
     seed: int = 42
     dataloader_num_workers: int = 2
     max_grad_norm: float = 1.0

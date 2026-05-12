@@ -9,7 +9,6 @@ from transformers import AutoTokenizer
 
 from .config import ModelConfig, DataConfig
 
-
 disable_caching()
 
 
@@ -31,8 +30,12 @@ def load_and_prepare_dataframes(
     test_df[text_col] = test_df[text_col].astype(str).str.strip()
     test_df[label_col] = test_df[label_col].astype(str).str.strip()
 
-    train_df = train_df[(train_df[text_col] != "") & (train_df[label_col] != "")].reset_index(drop=True)
-    test_df = test_df[(test_df[text_col] != "") & (test_df[label_col] != "")].reset_index(drop=True)
+    train_df = train_df[
+        (train_df[text_col] != "") & (train_df[label_col] != "")
+    ].reset_index(drop=True)
+    test_df = test_df[
+        (test_df[text_col] != "") & (test_df[label_col] != "")
+    ].reset_index(drop=True)
 
     return train_df, test_df
 
@@ -123,10 +126,18 @@ def build_dataset_dict(
     model_cfg: ModelConfig,
     data_cfg: DataConfig,
 ) -> DatasetDict:
-    dataset = DatasetDict({
-        "train": Dataset.from_pandas(train_df[[data_cfg.text_col, "label_id"]], preserve_index=False),
-        "validation": Dataset.from_pandas(test_df[[data_cfg.text_col, "label_id"]], preserve_index=False),
-    })
+    dataset = DatasetDict(
+        {
+            "train": Dataset.from_pandas(
+                train_df[[data_cfg.text_col, "label_id"]],
+                preserve_index=False,
+            ),
+            "validation": Dataset.from_pandas(
+                test_df[[data_cfg.text_col, "label_id"]],
+                preserve_index=False,
+            ),
+        }
+    )
 
     tokenize_document = build_tokenize_document_fn(tokenizer, model_cfg, data_cfg)
 
@@ -134,6 +145,5 @@ def build_dataset_dict(
         tokenize_document,
         load_from_cache_file=False,
     )
-
     dataset.set_format(type="python")
     return dataset

@@ -1,4 +1,3 @@
-import copy
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -52,10 +51,7 @@ def build_checkpoint_payload(
     return payload
 
 
-def save_checkpoint_payload(
-    payload: Dict[str, Any],
-    checkpoint_path: str,
-) -> Path:
+def save_checkpoint_payload(payload: Dict[str, Any], checkpoint_path: str) -> Path:
     checkpoint_path = Path(checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(payload, checkpoint_path)
@@ -142,9 +138,17 @@ def export_model_bundle(
         json.dump(training_meta, f, ensure_ascii=False, indent=2)
 
     print(f"Model weights saved to: {export_path / 'pytorch_model.bin'}")
-    print(f"Tokenizer saved to:     {export_path}")
-    print(f"Meta saved to:          {export_path / 'training_meta.json'}")
+    print(f"Tokenizer saved to: {export_path}")
+    print(f"Meta saved to: {export_path / 'training_meta.json'}")
     print("Excluded from checkpoint: ['class_weights']")
+
+
+def save_train_history(log_history, output_dir: str) -> Path:
+    path = Path(output_dir) / "train_history.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(log_history, f, ensure_ascii=False, indent=2)
+    print(f"Train history saved to: {path}")
+    return path
 
 
 def load_recovery_checkpoint(
@@ -156,7 +160,6 @@ def load_recovery_checkpoint(
     strict: bool = True,
 ) -> Tuple[Dict[str, Any], int]:
     ckpt = torch.load(checkpoint_path, map_location=map_location)
-
     model.load_state_dict(ckpt["model_state_dict"], strict=strict)
 
     if optimizer is not None and ckpt.get("optimizer_state_dict") is not None:
@@ -168,9 +171,9 @@ def load_recovery_checkpoint(
     start_epoch = ckpt["epoch"] + 1
 
     print(f"Loaded checkpoint from: {checkpoint_path}")
-    print(f"Resume from epoch:      {start_epoch}")
+    print(f"Resume from epoch: {start_epoch}")
     if ckpt.get("metrics") is not None:
-        print(f"Stored metrics:         {ckpt['metrics']}")
+        print(f"Stored metrics: {ckpt['metrics']}")
 
     return ckpt, start_epoch
 
@@ -199,6 +202,7 @@ class BestMetricTrackerCallback(TrainerCallback):
         self.best_epoch = None
         self.best_metrics = None
         self.best_state_dict = None
+        self.best_checkpoint_path = None
 
     def bind_trainer(self, trainer: Trainer) -> None:
         self.trainer_ref = trainer
@@ -231,7 +235,7 @@ class BestMetricTrackerCallback(TrainerCallback):
         if metric_key not in metrics:
             return control
 
-        current_metric = metrics[metric_key]
+        current_metric = float(metrics[metric_key])
         epoch_value = state.epoch
         if epoch_value is None:
             return control
@@ -239,7 +243,7 @@ class BestMetricTrackerCallback(TrainerCallback):
         epoch_num = int(round(epoch_value))
 
         if self._is_better(current_metric):
-            self.best_metric = float(current_metric)
+            self.best_metric = current_metric
             self.best_epoch = epoch_num
             self.best_metrics = dict(metrics)
             self.best_state_dict = {
@@ -247,7 +251,7 @@ class BestMetricTrackerCallback(TrainerCallback):
                 for k, v in get_filtered_model_state_dict(self.trainer_ref.model).items()
             }
 
-            save_best_training_checkpoint(
+            self.best_checkpoint_path = save_best_training_checkpoint(
                 trainer=self.trainer_ref,
                 output_dir=self.output_dir,
                 epoch=epoch_num,
@@ -395,7 +399,7 @@ def build_training_arguments(
         learning_rate=train_cfg.lr_encoder,
         lr_scheduler_type="cosine",
         weight_decay=train_cfg.weight_decay,
-        warmup_ratio=train_cfg.warmup_ratio,
+        warmup_steps=train_cfg.warmup_steps,
         fp16=torch.cuda.is_available(),
         seed=train_cfg.seed,
         dataloader_num_workers=train_cfg.dataloader_num_workers,
@@ -578,10 +582,21 @@ def run_training_pipeline(
         }
         best_epoch = None
         best_metrics = eval_metrics
+        best_checkpoint_path = None
     else:
         best_state_dict = best_callback.best_state_dict
         best_epoch = best_callback.best_epoch
         best_metrics = best_callback.best_metrics
+        best_checkpoint_path = str(best_callback.best_checkpoint_path) if best_callback.best_checkpoint_path else None
+
+    print("\nBEST METRICS")
+    print(f"best_epoch:         {best_epoch}")
+    print(f"balanced_accuracy:  {best_metrics['eval_balanced_accuracy']:.6f}")
+    print(f"f1_macro:           {best_metrics['eval_f1_macro']:.6f}")
+    if best_checkpoint_path is not None:
+        print(f"best_checkpoint:    {best_checkpoint_path}")
+
+    save_train_history(trainer.state.log_history, path_cfg.output_dir)
 
     export_model_bundle(
         model_state_dict=best_state_dict,
@@ -597,6 +612,7 @@ def run_training_pipeline(
             "final_eval_metrics": eval_metrics,
             "best_epoch": best_epoch,
             "best_metrics": best_metrics,
+            "best_checkpoint_path": best_checkpoint_path,
         },
     )
 

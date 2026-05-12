@@ -32,7 +32,10 @@ def load_export_bundle(output_dir: str):
         class_weights_tensor=None,
     )
 
-    state_dict = torch.load(export_path / "pytorch_model.bin", map_location=get_device_map_location())
+    state_dict = torch.load(
+        export_path / "pytorch_model.bin",
+        map_location=get_device_map_location(),
+    )
     model.load_state_dict(state_dict, strict=True)
     model.eval()
 
@@ -78,7 +81,7 @@ def build_inference_batch(texts: List[str], tokenizer, model_cfg: ModelConfig):
 
 
 @torch.no_grad()
-def predict_texts(output_dir: str, texts: List[str]):
+def predict_texts(output_dir: str, texts: List[str], top_k: int = 3):
     model, tokenizer, model_cfg, data_cfg, label2id, id2label = load_export_bundle(output_dir)
     device = torch.device(get_device_map_location())
     model.to(device)
@@ -88,16 +91,29 @@ def predict_texts(output_dir: str, texts: List[str]):
 
     outputs = model(**batch)
     logits = outputs["logits"]
-    probs = torch.softmax(logits, dim=-1).cpu().numpy()
-    pred_ids = probs.argmax(axis=-1)
+    probs = torch.softmax(logits, dim=-1).cpu()
+    pred_ids = probs.argmax(dim=-1).tolist()
 
     results = []
     for i, pred_id in enumerate(pred_ids):
-        results.append({
-            "text": texts[i],
-            "pred_label": id2label[int(pred_id)],
-            "pred_id": int(pred_id),
-            "probs": probs[i].tolist(),
-        })
+        prob_vec = probs[i]
+        top_probs, top_ids = torch.topk(prob_vec, k=min(top_k, prob_vec.shape[0]))
+
+        results.append(
+            {
+                "text": texts[i],
+                "pred_label": id2label[int(pred_id)],
+                "pred_id": int(pred_id),
+                "probs": prob_vec.tolist(),
+                "top_k": [
+                    {
+                        "label": id2label[int(cls_id)],
+                        "id": int(cls_id),
+                        "prob": float(cls_prob),
+                    }
+                    for cls_prob, cls_id in zip(top_probs.tolist(), top_ids.tolist())
+                ],
+            }
+        )
 
     return results

@@ -165,14 +165,14 @@ if __name__ == "__main__":
 python -m hybrid.main build \
   --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu
 
 python -m hybrid.main build \
   --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --device cpu
 
 python -m hybrid.main classical \
@@ -198,8 +198,8 @@ python -m hybrid.main mlp \
 # fine-tune train_augmented_3:
 # balanced_accuracy: 0.32539, macro_f1: 0.345667
 # original train_augmented_3
-# balanced_accuracy: 0.387764, macro_f1: 0.400307
-
+# weight 5 balanced_accuracy: 0.387764, macro_f1: 0.400307
+# weight 50 balanced_accuracy: 0.372608, macro_f1: 0.397246
 # ---- Косинусное сходство
 
 python -m cosine_similarity_classification.main \

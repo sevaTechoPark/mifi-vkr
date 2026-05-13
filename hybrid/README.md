@@ -5,7 +5,7 @@
 
 - sparse TF-IDF признаков по словам и символьным n-граммам;
 - dense BERT-эмбеддингов длинных текстов;
-- масштабированной BERT-части с коэффициентом `bert_weight`.
+- масштабированной BERT-части (масштаб задаётся одним из параметров конфигурации).
 
 Пакет поддерживает три режима:
 
@@ -26,11 +26,22 @@ python -m hybrid.main ...
 ```text
 hybrid/
 ├── __init__.py
+├── config.py
 ├── main.py
 ├── hybrid_vector_build.py
 ├── hybrid_classical_models.py
 └── hybrid_mlp.py
 ```
+
+### `config.py`
+
+Хранит dataclass-конфиги для CLI и сборки признаков:
+
+- `HybridModelConfig` — параметры BERT-части и chunking/pooling;
+- `HybridDataConfig` — имена колонок датасета;
+- `HybridPathConfig` — пути к train/test/output.
+
+Этот файл является **единым источником дефолтных значений** для режима `build`.
 
 ### `hybrid_vector_build.py`
 
@@ -42,10 +53,10 @@ hybrid/
 - получает BERT-эмбеддинги;
 - масштабирует dense BERT-часть;
 - объединяет sparse TF-IDF и dense BERT в один hybrid vector;
-- сохраняет артефакты в `outdir`.
+- сохраняет артефакты в `output_dir`.
 
-Если передан `--model_dir`, используются эмбеддинги из fine-tuned модели через `LongTextRobertaEmbedder`.  
-Если `--model_dir` не передан, используется базовая `ai-forever/ruRoberta-large`.
+Если передан `--model-dir`, используются эмбеддинги из fine-tuned модели через `LongTextRobertaEmbedder`.  
+Если `--model-dir` не передан, используется базовая `ai-forever/ruRoberta-large`.
 
 ### `hybrid_classical_models.py`
 
@@ -81,6 +92,8 @@ hybrid/
 ```bash
 python -m hybrid.main ...
 ```
+
+`main.py` не хранит собственные дефолты для `build`, а собирает конфиги из `config.py` и переопределяет только те значения, которые были явно переданы через CLI.
 
 ---
 
@@ -126,7 +139,7 @@ python -m hybrid.main ...
 - `transformers`
 - `joblib`
 
-Если используется fine-tuned embedder через `--model_dir`, должен быть доступен модуль:
+Если используется fine-tuned embedder через `--model-dir`, должен быть доступен модуль:
 
 ```python
 from bert_embeddings.embedding_model import LongTextRobertaEmbedder
@@ -145,8 +158,8 @@ from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 
 По умолчанию используются именно эти имена, но их можно переопределить через:
 
-- `--text_col`
-- `--label_col`
+- `--text-col`
+- `--label-col`
 
 ---
 
@@ -158,26 +171,27 @@ from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 
 ```bash
 python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+  --train-file /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --test-file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --model-dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu
 ```
 
 Этот режим:
+
 - строит TF-IDF признаки;
 - получает dense embeddings через `LongTextRobertaEmbedder`;
 - склеивает всё в hybrid vector;
-- сохраняет результат в `outdir`.
+- сохраняет результат в `output_dir`.
 
 ### Через базовую ruRoberta без `model_dir`
 
 ```bash
 python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --train-file /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --test-file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --device cpu
 ```
 
@@ -187,18 +201,17 @@ python -m hybrid.main build \
 
 ```bash
 python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+  --train-file /Users/v.papadyk/ml/mifi-vkr/data/train_paraphrase_2.csv \
+  --test-file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --model-dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu \
-  --bert_weight 5.0 \
-  --max_length 512 \
-  --chunk_size 448 \
-  --chunk_overlap 96 \
+  --max-length 512 \
+  --chunk-size 448 \
+  --chunk-overlap 96 \
   --pooling mean_max \
-  --chunk_aggregation mean_max \
-  --batch_size 8
+  --chunk-aggregation mean_max \
+  --batch-size 8
 ```
 
 ---
@@ -229,6 +242,7 @@ python -m hybrid.main mlp \
 ```
 
 Скрипт:
+
 - обучает MLP;
 - печатает train loss и метрики по эпохам;
 - останавливается по early stopping;
@@ -242,21 +256,27 @@ python -m hybrid.main mlp \
 
 ### `build`
 
-- `--train` — путь к train CSV
-- `--test` — путь к test CSV
-- `--outdir` — директория, куда сохраняются hybrid vectors и служебные артефакты
-- `--model_dir` — путь к fine-tuned модели для `LongTextRobertaEmbedder`
+Обязательные аргументы:
+
+- `--train-file` — путь к train CSV
+- `--test-file` — путь к test CSV
+- `--output-dir` — директория, куда сохраняются hybrid vectors и служебные артефакты
+
+Дополнительные аргументы:
+
+- `--model-dir` — путь к fine-tuned модели для `LongTextRobertaEmbedder`
 - `--device` — `cpu` или `cuda`
-- `--bert_weight` — вес dense BERT-части в hybrid vector
-- `--base_model_name` — базовая HF-модель, по умолчанию `ai-forever/ruRoberta-large`
-- `--text_col` — имя колонки с текстом
-- `--label_col` — имя колонки с меткой
-- `--max_length` — максимальная длина токенов
-- `--chunk_size` — длина чанка для embedder
-- `--chunk_overlap` — overlap между чанками
+- `--base-model-name` — базовая HF-модель, по умолчанию `ai-forever/ruRoberta-large`
+- `--text-col` — имя колонки с текстом
+- `--label-col` — имя колонки с меткой
+- `--max-length` — максимальная длина токенов
+- `--chunk-size` — длина чанка для embedder
+- `--chunk-overlap` — overlap между чанками
 - `--pooling` — pooling на уровне токенов
-- `--chunk_aggregation` — агрегация чанков
-- `--batch_size` — batch size при построении dense embeddings
+- `--chunk-aggregation` — агрегация чанков
+- `--batch-size` — batch size при построении dense embeddings
+
+Если аргумент не передан, берётся значение из `config.py`.
 
 ### `classical`
 
@@ -276,10 +296,10 @@ python -m hybrid.main mlp \
 
 ```bash
 python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+  --train-file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+  --test-file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --model-dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu
 ```
 
@@ -303,9 +323,9 @@ python -m hybrid.main mlp \
 
 ## Примечания
 
-- Запуск через `python -m hybrid.main` требует, чтобы команда выполнялась **из корня проекта**, где директория `hybrid/` видна как пакет Python. [web:540][web:545]
-- Если `bert_embeddings` лежит в том же проекте, запуск из корня обычно достаточен, чтобы импорт `bert_embeddings.embedding_model` работал корректно. [web:540]
-- Если нужен запуск напрямую как пакета без указания `main`, можно дополнительно добавить `hybrid/__main__.py`, но для текущего сценария это не обязательно. [web:545]
+- Запуск через `python -m hybrid.main` требует, чтобы команда выполнялась **из корня проекта**, где директория `hybrid/` видна как пакет Python.
+- Если `bert_embeddings` лежит в том же проекте, запуск из корня обычно достаточен, чтобы импорт `bert_embeddings.embedding_model` работал корректно.
+- Если нужен запуск напрямую как пакета без указания `main`, можно дополнительно добавить `hybrid/__main__.py`, но для текущего сценария это не обязательно.
 
 ---
 

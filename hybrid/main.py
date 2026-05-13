@@ -1,8 +1,73 @@
 import argparse
+from dataclasses import fields, replace
 
+from .config import HybridModelConfig, HybridDataConfig, HybridPathConfig
 from .hybrid_vector_build import run_build
 from .hybrid_classical_models import run_classical
 from .hybrid_mlp import run_mlp
+
+
+def _str2bool(v):
+    if isinstance(v, bool):
+        return v
+    v = str(v).strip().lower()
+    if v in {"true", "1", "yes", "y"}:
+        return True
+    if v in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {v}")
+
+
+def _field_arg_type(f):
+    if f.type is bool:
+        return _str2bool
+    if f.type in (int, float, str):
+        return f.type
+    default_type = type(f.default)
+    if default_type is bool:
+        return _str2bool
+    return default_type
+
+
+def _override_dataclass_from_args(cfg, args, allowed_fields):
+    updates = {}
+    for name in allowed_fields:
+        if hasattr(args, name):
+            value = getattr(args, name)
+            if value is not None:
+                updates[name] = value
+    return replace(cfg, **updates)
+
+
+def build_configs_from_args(args):
+    model_cfg = _override_dataclass_from_args(
+        HybridModelConfig(),
+        args,
+        {f.name for f in fields(HybridModelConfig)},
+    )
+    data_cfg = _override_dataclass_from_args(
+        HybridDataConfig(),
+        args,
+        {f.name for f in fields(HybridDataConfig)},
+    )
+
+    path_cfg = HybridPathConfig(
+        train_file=args.train_file,
+        test_file=args.test_file,
+        output_dir=args.output_dir,
+    )
+
+    return model_cfg, data_cfg, path_cfg
+
+
+def _add_dataclass_args(parser, dc_cls):
+    for f in fields(dc_cls):
+        parser.add_argument(
+            f"--{f.name.replace('_', '-')}",
+            dest=f.name,
+            type=_field_arg_type(f),
+            default=None,
+        )
 
 
 def build_parser():
@@ -12,21 +77,14 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build_parser = subparsers.add_parser("build", help="Build hybrid vectors")
-    build_parser.add_argument("--train", required=True)
-    build_parser.add_argument("--test", required=True)
-    build_parser.add_argument("--outdir", required=True)
-    build_parser.add_argument("--model_dir", default=None)
+    build_parser.add_argument("--train-file", required=True)
+    build_parser.add_argument("--test-file", required=True)
+    build_parser.add_argument("--output-dir", required=True)
+    build_parser.add_argument("--model-dir", default=None)
     build_parser.add_argument("--device", default="cpu")
-    build_parser.add_argument("--bert_weight", type=float, default=5.0)
-    build_parser.add_argument("--base_model_name", default="ai-forever/ruRoberta-large")
-    build_parser.add_argument("--text_col", default="text")
-    build_parser.add_argument("--label_col", default="label")
-    build_parser.add_argument("--max_length", type=int, default=512)
-    build_parser.add_argument("--chunk_size", type=int, default=448)
-    build_parser.add_argument("--chunk_overlap", type=int, default=96)
-    build_parser.add_argument("--pooling", choices=["mean", "cls", "max", "mean_max"], default="mean_max")
-    build_parser.add_argument("--chunk_aggregation", choices=["mean", "max", "mean_max"], default="mean_max")
-    build_parser.add_argument("--batch_size", type=int, default=8)
+
+    _add_dataclass_args(build_parser, HybridModelConfig)
+    _add_dataclass_args(build_parser, HybridDataConfig)
 
     classical_parser = subparsers.add_parser("classical", help="Run classical models on hybrid vectors")
     classical_parser.add_argument("--vecdir", required=True)
@@ -44,22 +102,16 @@ def main():
     args = parser.parse_args()
 
     if args.command == "build":
+        model_cfg, data_cfg, path_cfg = build_configs_from_args(args)
+
         run_build(
-            train_file=args.train,
-            test_file=args.test,
-            outdir=args.outdir,
+            train_file=path_cfg.train_file,
+            test_file=path_cfg.test_file,
+            outdir=path_cfg.output_dir,
             model_dir=args.model_dir,
             device=args.device,
-            bert_weight=args.bert_weight,
-            base_model_name=args.base_model_name,
-            text_col=args.text_col,
-            label_col=args.label_col,
-            max_length=args.max_length,
-            chunk_size=args.chunk_size,
-            chunk_overlap=args.chunk_overlap,
-            pooling=args.pooling,
-            chunk_aggregation=args.chunk_aggregation,
-            batch_size=args.batch_size,
+            model_cfg=model_cfg,
+            data_cfg=data_cfg,
         )
     elif args.command == "classical":
         run_classical(args.vecdir)

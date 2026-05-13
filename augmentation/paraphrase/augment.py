@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
-from ..common.masks import mask_placeholders, unmask_placeholders, has_leftover_mask_tokens
+from ..common.masks import mask_placeholders, unmask_placeholders, placeholders_intact
 from ..common.config import SIM_MIN, SIM_MAX
 
 
@@ -200,8 +200,8 @@ def paraphrase_document(
     result_masked = " ".join(paraphrased_sentences)
     para_text = unmask_placeholders(result_masked, mapping)
 
-    # safety-check: если остались <PH_...> — возвращаем исходный текст
-    if has_leftover_mask_tokens(para_text):
+    # safety-check: если плейсхолдеры нарушены, лучше вернуть исходный текст
+    if not placeholders_intact(source_text, para_text):
         return source_text
 
     return para_text

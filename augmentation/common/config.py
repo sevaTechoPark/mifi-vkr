@@ -16,7 +16,7 @@ PARA_SIM_MIN = 0.75
 PARA_SIM_MAX = 0.95
 
 # сколько символов считаем "коротким" исходником
-SHORT_TEXT_THRESHOLD = 400
+SHORT_TEXT_THRESHOLD = 700
 
 # минимальное отношение длины paraphrase/source для коротких текстов
 PARAPHRASE_MIN_LEN_RATIO_SHORT = 0.40

@@ -15,7 +15,7 @@ from sklearn.metrics import (
 )
 from pathlib import Path
 
-TRAIN_PATH = "data/train_augmented_original_plus_summary_3.csv"
+TRAIN_PATH = "data/train.csv"
 # train.csv / train_paraphrase.csv / train_backtranslate.csv / train_augmented.csv
 # train_augmented_summarized.csv / train_augmented_original_plus_summary.csv
 TEST_PATH  = "data/test.csv"
@@ -162,21 +162,21 @@ if __name__ == "__main__":
 
 # --- Композитный вектор
 
-python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --model-dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-  --device cpu
+# python -m hybrid.main build \
+#   --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+#   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+#   --model-dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+#   --device cpu
 
-python -m hybrid.main build \
-  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
-  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --device cpu
+# python -m hybrid.main build \
+#   --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+#   --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --output-dir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+#   --device cpu
 
-python -m hybrid.main classical \
-  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec
+# python -m hybrid.main classical \
+#   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec
 
 # train_augmented
 # linear_svc {'balanced_accuracy': 0.340786, 'macro_f1': 0.321917}
@@ -191,10 +191,10 @@ python -m hybrid.main classical \
 # linear_svc: {'balanced_accuracy': 0.221075, 'macro_f1': 0.217713}
 # logreg: {'balanced_accuracy': 0.343632, 'macro_f1': 0.356956}
 
-python -m hybrid.main mlp \
-  --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
-  --epochs 40 \
-  --device cpu
+# python -m hybrid.main mlp \
+#   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+#   --epochs 40 \
+#   --device cpu
 
 # train_augmented
 # balanced_accuracy: 0.447552, macro_f1: 0.433175
@@ -205,17 +205,17 @@ python -m hybrid.main mlp \
 # weight 50 balanced_accuracy: 0.372608, macro_f1: 0.397246
 # ---- Косинусное сходство
 
-python -m cosine_similarity_classification.main \
-  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
-  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-  --method centroid
+# python -m cosine_similarity_classification.main \
+#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+#   --method centroid
 
-python -m cosine_similarity_classification.main \
-  --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
-  --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
-  --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
-  --method nearest
+# python -m cosine_similarity_classification.main \
+#   --train_file /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+#   --test_file /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+#   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
+#   --method nearest
 
 # centroid train_augmented: balanced_accuracy: 0.149607, macro_f1: 0.121122
 # centroid train_augmented_3_v1: balanced_accuracy: 0.118086, macro_f1: 0.082073

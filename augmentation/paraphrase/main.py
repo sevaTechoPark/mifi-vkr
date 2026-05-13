@@ -17,19 +17,22 @@ def build_augment_fn(tok, model, embed_model, device):
     return augment_fn
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Paraphrase augmentation")
-    parser.add_argument("--train",      required=True,  help="Path to train CSV")
-    parser.add_argument("--output-dir", required=True,  help="Directory for output files")
-    parser.add_argument("--single",     default=None,   help="Single text to paraphrase")
-    parser.add_argument("--seed",       type=int,       default=42, help="Random seed for reproducibility")
-    args = parser.parse_args()
+def run_from_params(
+    train_file: str,
+    output_dir: str,
+    seed: int = 42,
+    single_text: str | None = None,
+):
+    """
+    Запуск аугментации перефразом из кода (без argparse).
 
-    # фиксируем рандом
-    seed = get_seed_or_default(args.seed)
+    Возвращает:
+      - df_full: исходный train + новые строки (label, text)
+      - df_aug: только аугментированные примеры
+    """
     set_seed(seed)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     embed_model = load_embed_model(device)
@@ -37,14 +40,12 @@ def main():
 
     augment_fn = build_augment_fn(tok, para_model, embed_model, device)
 
-    if args.single:
-        result = augment_fn(args.single)
-        print("\n=== Paraphrased ===")
-        print(result)
-        return
+    if single_text is not None:
+        result = augment_fn(single_text)
+        return result  # для единичного примера просто возвращаем строку
 
-    df = pd.read_csv(args.train)
-    aug_file = os.path.join(args.output_dir, "train_paraphrase_partial.csv")
+    df = pd.read_csv(train_file)
+    aug_file = os.path.join(output_dir, "train_paraphrase_partial.csv")
 
     df_aug = run_augmentation_loop(
         df=df,
@@ -55,9 +56,37 @@ def main():
     )
 
     df_full = pd.concat([df, df_aug[["label", "text"]]], ignore_index=True)
-    final_path = os.path.join(args.output_dir, "train_paraphrase.csv")
+    final_path = os.path.join(output_dir, "train_paraphrase.csv")
     df_full.to_csv(final_path, index=False)
     print(f"Финальный датасет: {final_path}")
+
+    return df_full, df_aug
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Paraphrase augmentation")
+    parser.add_argument("--train",      required=True,  help="Path to train CSV")
+    parser.add_argument("--output-dir", required=True,  help="Directory for output files")
+    parser.add_argument("--single",     default=None,   help="Single text to paraphrase")
+    parser.add_argument("--seed",       type=int,       default=42, help="Random seed for reproducibility")
+    args = parser.parse_args()
+
+    if args.single:
+        result = run_from_params(
+            train_file=args.train,
+            output_dir=args.output_dir,
+            seed=args.seed,
+            single_text=args.single,
+        )
+        print("\n=== Paraphrased ===")
+        print(result)
+    else:
+        run_from_params(
+            train_file=args.train,
+            output_dir=args.output_dir,
+            seed=args.seed,
+            single_text=None,
+        )
 
 
 if __name__ == "__main__":

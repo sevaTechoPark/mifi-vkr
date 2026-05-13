@@ -35,7 +35,7 @@ def choose_best_bt(
     rugpt_tok,
     rugpt_model,
     rugpt_device: torch.device,
-) -> tuple[str, float]:
+) -> str:
     if not candidates:
         return source_chunk, 1.0
 
@@ -52,7 +52,7 @@ def choose_best_bt(
         filtered_sims = sims[idxs]
         ppls = rugpt_perplexity_list(filtered, rugpt_tok, rugpt_model, rugpt_device)
         best_local = min(range(len(filtered)), key=lambda i: (ppls[i], -filtered_sims[i].item()))
-        return filtered[best_local], filtered_sims[best_local].item()
+        return filtered[best_local]
 
     best_idx = torch.argmax(sims).item()
     return candidates[best_idx]

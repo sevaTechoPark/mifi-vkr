@@ -1,4 +1,4 @@
-TARGET_PER_CLASS = 5
+TARGET_PER_CLASS = 30
 EMBED_MODEL_NAME = "deepvk/USER2-base"
 RUGPT_MODEL_NAME = "sberbank-ai/rugpt3small_based_on_gpt2"
 

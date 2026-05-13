@@ -1,68 +1,116 @@
 import re
+import html
+
 
 def preprocess_text(text: str) -> str:
-    """
-    Убираем шумовые конструкции до генерации:
-    длинные цепочки символов, множественные пробелы.
-    """
     text = re.sub(r"[-=_*]{5,}", "—", text)
     text = re.sub(r"[.\s]{5,}", " ", text)
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
 
-# паттерн для явного мусора в сгенерированных текстах
 _URL_PATTERN = re.compile(r"https?://\S+")
-_MULTIPUNCT_PATTERN = re.compile(r"([,.;:!?])\1{1,}")  # ,,  ..  !!!  → одна
+_MULTIPUNCT_PATTERN = re.compile(r"([,.;:!?])\1{1,}")
 _SPACES_PATTERN = re.compile(r"\s+")
 
-# артефакты старых масок и T5-галлюцинаций (PH_7, PH.24, PCH., PS_33 и т.п.)
+# расширенный паттерн PH-мусора: <PS_0>, <FH_10>, <PH_3>, HP_13, CRR итп
 _PH_GARBAGE_PATTERN = re.compile(
     r"""
-    \b[Pp][Hh][\w\.\-\_]*\b     # PH, Ph_7, PH.24, pH-33, PCH., PS_33
+    (
+      <\s*[A-Za-z]{1,4}[_\-\s]*\d+\s*>   # <PS_0>, <FH_10>, < PH-3 >
+    |
+      \b[A-Z]{1,3}[HPh][_\-]?\d+\b        # HP_13, FH10, PH3
+    |
+      \b[Pp][Hh][\w.\-_]*\b               # PH, Ph_7, PH.24, pH-33
+    |
+      \b[A-Z]{2,4}_\d+\b                  # CRR, PSG, RH_17
+    )
+    """,
+    re.VERBOSE,
+)
+
+# HTML-entities
+_HTML_ENTITY_PATTERN = re.compile(r"&(?:lt|gt|amp|quot|nbsp|apos);")
+
+# реквизитные заголовки без значимого содержания
+# ловит: "Телефон:", "e-mail:", "mail:", "адрес:", "и:", "или:"
+_LABEL_NOISE_PATTERN = re.compile(
+    r"\b(?:тел(?:ефон)?|e[\-\s]?mail|mail|факс|fax|адрес|эл\.?\s*почта|бухгалтерия\s+тел|птo\s+тел)\s*:[\s,;.]*",
+    re.IGNORECASE,
+)
+
+# паразитные строки вида "должность: - должность:" или ": и." или ":,"
+_COLON_NOISE_PATTERN = re.compile(r"(?:должность|контактный телефон|контакт)\s*:\s*[-—]*\s*", re.IGNORECASE)
+
+# одиночные незначимые символы или их цепочки: "Щ Щ Щ", "*", "[]", "♪", "{>", "#>"
+_SYMBOL_NOISE_PATTERN = re.compile(
+    r"""
+    (
+      (?:[ЩщЪъЫы]\s+){2,}   # цепочки паразитных букв
+    |
+      [♪♫♬♩✓✗→←↑↓]          # музыкальные и стрелочные символы
+    |
+      \{\s*[><!]             # {>, {!, {<
+    |
+      [#<>]\s*[><!]?         # #>, <., >.
+    |
+      \[\s*\]                # пустые скобки []
+    |
+      \*\s*\.?\s*            # * или *.
+    )
     """,
     re.VERBOSE,
 )
 
 
 def clean_generated_text(text: str) -> str:
-    """
-    Лёгкая пост-обработка сгенерированного текста:
-    - убираем URL'ы, повторяющуюся пунктуацию,
-    - вычищаем артефакты PH/PCH/PH.24,
-    - схлопываем пробелы.
-    """
-    # убираем случайные URL'ы (T5 любит их галлюцинировать)
+    # HTML entities → нормальные символы
+    text = html.unescape(text)
+
+    # убираем URL
     text = _URL_PATTERN.sub("", text)
+
+    # убираем реквизитные заголовки-одиночки
+    text = _LABEL_NOISE_PATTERN.sub("", text)
+
+    # убираем "должность: -" и подобные хвосты
+    text = _COLON_NOISE_PATTERN.sub("", text)
+
+    # убираем паразитные символы и цепочки
+    text = _SYMBOL_NOISE_PATTERN.sub(" ", text)
 
     # схлопываем повторяющуюся пунктуацию
     text = _MULTIPUNCT_PATTERN.sub(r"\1", text)
 
-    # вычищаем PH-артефакты, не затрагивая [PLACEHOLDER]
+    # вычищаем PH-артефакты
     text = _PH_GARBAGE_PATTERN.sub("", text)
 
-    # аккуратная нормализация пробелов
+    # нормализуем пробелы
     text = _SPACES_PATTERN.sub(" ", text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+
+    # убираем «висячие» начальные пунктуационные цепочки вида ";,." в начале текста
+    text = re.sub(r"^[;:,.\s]+", "", text)
+
     return text.strip()
 
+
+def clean_aug_result(text: str) -> str:
+    text = re.sub(r"([,.!?])\1{2,}", r"\1", text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+,", ",", text)
+    text = re.sub(r",\s*", ", ", text)
+    return text.strip()
+
+
 def is_highly_formal(text: str) -> bool:
-    """
-    Грубая эвристика: считаем текст 'формальным' (деловые письма с реквизитами),
-    если:
-      - текст достаточно длинный,
-      - явно есть реквизитные маркеры,
-      - очень большая доля цифр или заглавных.
-    """
     digits = sum(ch.isdigit() for ch in text)
     uppers = sum(ch.isupper() for ch in text)
     letters = sum(ch.isalpha() for ch in text)
 
     if letters < 80:
-        # короткие тексты почти никогда не считаем "слишком формальными"
         return False
 
-    # отношение цифр/букв
     digit_ratio = digits / max(1, letters)
     upper_ratio = uppers / max(1, letters)
 
@@ -72,16 +120,3 @@ def is_highly_formal(text: str) -> bool:
     if has_rekviz and (digit_ratio > 0.35 or upper_ratio > 0.55):
         return True
     return False
-
-def clean_aug_result(text: str) -> str:
-    """
-    Лёгкая пост-обработка результатов генерации/перевода:
-    - схлопываем повторяющиеся знаки препинания,
-    - чистим пробелы вокруг запятых,
-    - убираем лишние пробелы.
-    """
-    text = re.sub(r"([,.!?])\1{2,}", r"\1", text)
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\s+,", ",", text)
-    text = re.sub(r",\s*", ", ", text)
-    return text.strip()

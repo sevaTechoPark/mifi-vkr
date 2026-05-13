@@ -99,12 +99,6 @@ class CustomMLMCheckpointCallback(TrainerCallback):
         if self.tokenizer:
             self.tokenizer.save_pretrained(self.best_model_dir)
 
-        # сразу удаляем _trainer_tmp — он больше не нужен
-        trainer_tmp = self.output_dir / "_trainer_tmp"
-        if trainer_tmp.exists():
-            shutil.rmtree(trainer_tmp)
-            print(f"  Removed _trainer_tmp: {trainer_tmp}")
-
         return control
 
 
@@ -180,10 +174,11 @@ def run_from_params(
     def build_meta():
         return {k: getattr(cfg, k) for k in MLMConfig.__dataclass_fields__}
 
-    trainer_tmp_dir = str(output_dir / "_trainer_tmp")
+    tmp_root = Path("/tmp") / "bert_embeddings_trainer"
+    tmp_root.mkdir(parents=True, exist_ok=True)
 
     training_args = TrainingArguments(
-        output_dir=trainer_tmp_dir,
+        output_dir=str(tmp_root),
         per_device_train_batch_size=cfg.train_batch_size,
         per_device_eval_batch_size=cfg.eval_batch_size,
         learning_rate=cfg.learning_rate,
@@ -193,7 +188,7 @@ def run_from_params(
         logging_steps=cfg.logging_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
-        save_total_limit=1,          # держим только 1 чекпоинт Trainer'а — экономим место
+        save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -201,6 +196,7 @@ def run_from_params(
         fp16=cfg.fp16,
         seed=cfg.seed,
     )
+
 
     checkpoint_callback = CustomMLMCheckpointCallback(
         output_dir=output_dir,

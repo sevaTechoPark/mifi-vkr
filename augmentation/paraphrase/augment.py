@@ -70,7 +70,7 @@ def choose_best_paraphrase(
       - ограничению по соотношению длин (PARA_MIN/MAX_LEN_RATIO).
     """
     if not candidates:
-        return source_chunk, 1.0
+        return source_chunk
 
     len_src = len(source_chunk)
     filtered_by_len: list[str] = []
@@ -98,13 +98,13 @@ def choose_best_paraphrase(
         best_idx = idxs[best_local].item()
         best_text = filtered_by_len[best_idx]
         best_text = postprocess_paraphrase_text(best_text)
-        return best_text, sims[best_idx].item()
+        return best_text
 
     # иначе берём просто максимально похожий
     best_idx = torch.argmax(sims).item()
     best_text = filtered_by_len[best_idx]
     best_text = postprocess_paraphrase_text(best_text)
-    return best_text, sims[best_idx].item()
+    return best_text
 
 
 def paraphrase_document(
@@ -140,7 +140,7 @@ def paraphrase_document(
             continue
 
         candidates = generate_para_candidates(s, tok, model, device)
-        best_text, _ = choose_best_paraphrase(
+        best_text = choose_best_paraphrase(
             source_chunk=s,
             candidates=candidates,
             embed_model=embed_model,

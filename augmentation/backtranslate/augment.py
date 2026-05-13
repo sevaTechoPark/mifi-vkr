@@ -37,7 +37,7 @@ def choose_best_bt(
     rugpt_device: torch.device,
 ) -> str:
     if not candidates:
-        return source_chunk, 1.0
+        return source_chunk
 
     texts = [source_chunk] + candidates
     embs = embed_model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)

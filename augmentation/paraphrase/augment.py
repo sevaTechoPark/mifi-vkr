@@ -6,9 +6,7 @@ from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
 from ..common.masks import mask_placeholders, unmask_placeholders
-from ..common.text_utils import preprocess_text, clean_generated_text
-from ..common.config import SIM_MIN, SIM_MAX
-
+from ..common.text_utils import preprocess_text, clean_generated_text, is_highly_formal
 
 def _get_tokens(text: str, tok, device):
     return tok(text, return_tensors="pt", padding=True, truncation=False).to(device)
@@ -100,23 +98,8 @@ def generate_best_paraphrase(
     embed_model: SentenceTransformer,
     device: torch.device,
 ) -> tuple[str, float]:
-    """
-    Консервативная версия:
-    - один детерминированный перефраз (beam search),
-    - считаем cosine с исходником,
-    - возвращаем (paraphrase, sim), а фильтрация происходит снаружи.
-    """
-    source_emb = embed_model.encode(
-        source_text, convert_to_tensor=True, normalize_embeddings=True
-    )
-
     para_text = generate_paraphrase(source_text, tok, model, device)
-    para_emb = embed_model.encode(
-        para_text, convert_to_tensor=True, normalize_embeddings=True
-    )
-
-    sim = util.cos_sim(source_emb, para_emb)[0].item()
-    return para_text, sim
+    return para_text
 
 
 def paraphrase_document(
@@ -126,6 +109,10 @@ def paraphrase_document(
     embed_model: SentenceTransformer,
     device: torch.device,
 ) -> str:
+    if is_highly_formal(source_text):
+        print('текст слишком формальный пропускаем перефраз')
+        return source_text
+
     masked_text, mapping = mask_placeholders(source_text)
     masked_text = preprocess_text(masked_text)
     sentences = [s.text for s in sentenize(masked_text)]
@@ -144,7 +131,7 @@ def paraphrase_document(
             position=1,
             leave=False,
         ):
-            para_text, _ = generate_best_paraphrase(sub, tok, model, embed_model, device)
+            para_text = generate_best_paraphrase(sub, tok, model, embed_model, device)
             paraphrased_subs.append(para_text)
 
         paraphrased_sentences.append(" ".join(paraphrased_subs))

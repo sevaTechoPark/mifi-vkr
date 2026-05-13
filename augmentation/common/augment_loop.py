@@ -9,7 +9,7 @@ import torch
 from tqdm.auto import tqdm
 from sentence_transformers import util, SentenceTransformer
 
-from .config import TARGET_PER_CLASS, SIM_MIN, SIM_MAX, SIM_LABEL_MIN, SIM_LABEL_MAX
+from .config import TARGET_PER_CLASS, SIM_LABEL_MIN, SIM_LABEL_MAX
 from .embeddings import cos_sim
 
 
@@ -27,6 +27,10 @@ def run_augmentation_loop(
     augment_fn,           # callable(text: str) -> str
     aug_file_path: str,
     augmentation_type: str,
+    sim_min: float,
+    sim_max: float,
+    min_len_ratio: float,
+    max_len_ratio: float,
 ) -> pd.DataFrame:
     counts = df["label"].value_counts()
     small_labels = counts[counts < TARGET_PER_CLASS].sort_values(ascending=True).index
@@ -85,13 +89,26 @@ def run_augmentation_loop(
 
             aug_text = augment_fn(source_text)
 
+            # фильтр по длине
+            len_src = len(source_text)
+            len_aug = len(aug_text)
+            len_ratio = len_aug / len_src
+
+            if not (min_len_ratio <= len_ratio <= max_len_ratio):
+                print(
+                    f"[SKIP] длина aug/source = {len_ratio:.2f} "
+                    f"(ожидалось [{min_len_ratio}, {max_len_ratio}])"
+                )
+                orig_idx = (orig_idx + 1) % orig_count
+                continue
+
             if normalize_text(aug_text) == normalize_text(source_text):
                 print(f"[SKIP] идентичен оригиналу")
                 orig_idx = (orig_idx + 1) % orig_count
                 continue
 
             original_cosine_sim = cos_sim(embed_model, source_text, aug_text)
-            if not (SIM_MIN <= original_cosine_sim <= SIM_MAX):
+            if not (sim_min <= original_cosine_sim <= sim_max):
                 print(f"[SKIP] sim с source={original_cosine_sim:.4f}")
                 orig_idx = (orig_idx + 1) % orig_count
                 continue

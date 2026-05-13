@@ -7,8 +7,7 @@ from .translate import safe_translate, clean_bt_result
 from ..common.masks import mask_placeholders, unmask_placeholders
 from ..common.text_utils import preprocess_text, clean_generated_text
 from ..common.perplexity import rugpt_perplexity_list
-from ..common.config import SIM_MIN, SIM_MAX
-
+from ..common.config import BT_SIM_MIN, BT_SIM_MAX
 
 LANG_PAIRS = [("ru-en", "en-ru"), ("ru-fr", "fr-ru"), ("ru-es", "es-ru")]
 
@@ -45,7 +44,7 @@ def choose_best_bt(
     src_emb, cand_embs = embs[0], embs[1:]
     sims = util.cos_sim(src_emb, cand_embs)[0]
 
-    mask = (sims >= SIM_MIN) & (sims <= SIM_MAX)
+    mask = (sims >= BT_SIM_MIN) & (sims <= BT_SIM_MAX)
 
     if mask.any():
         idxs = torch.nonzero(mask, as_tuple=False).squeeze(1)
@@ -56,7 +55,7 @@ def choose_best_bt(
         return filtered[best_local], filtered_sims[best_local].item()
 
     best_idx = torch.argmax(sims).item()
-    return candidates[best_idx], sims[best_idx].item()
+    return candidates[best_idx]
 
 
 def back_translate_document(
@@ -73,7 +72,7 @@ def back_translate_document(
     bt_sentences = []
     for s in tqdm(sentences, desc="Sentences"):
         candidates = generate_bt_candidates(s, device)
-        best_text, _ = choose_best_bt(s, candidates, embed_model, rugpt_tok, rugpt_model, device)
+        best_text = choose_best_bt(s, candidates, embed_model, rugpt_tok, rugpt_model, device)
         bt_sentences.append(best_text)
 
     result_masked = " ".join(bt_sentences)

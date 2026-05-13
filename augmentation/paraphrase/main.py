@@ -1,4 +1,4 @@
-# paraphrase/main.py
+# augmentation/paraphrase/main.py
 import argparse
 import os
 import torch
@@ -7,6 +7,10 @@ import pandas as pd
 from ..common.embeddings import load_embed_model
 from ..common.augment_loop import run_augmentation_loop
 from ..common.seed import set_seed, get_seed_or_default
+from ..common.config import (
+    PARA_SIM_MIN, PARA_SIM_MAX,
+    PARA_MIN_LEN_RATIO, PARA_MAX_LEN_RATIO,
+)
 from .models import load_paraphrase_model
 from .augment import paraphrase_document
 
@@ -23,13 +27,6 @@ def run_from_params(
     seed: int = 42,
     single_text: str | None = None,
 ):
-    """
-    Запуск аугментации перефразом из кода (без argparse).
-
-    Возвращает:
-      - df_full: исходный train + новые строки (label, text)
-      - df_aug: только аугментированные примеры
-    """
     set_seed(seed)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -41,8 +38,7 @@ def run_from_params(
     augment_fn = build_augment_fn(tok, para_model, embed_model, device)
 
     if single_text is not None:
-        result = augment_fn(single_text)
-        return result  # для единичного примера просто возвращаем строку
+        return augment_fn(single_text)
 
     df = pd.read_csv(train_file)
     aug_file = os.path.join(output_dir, "train_paraphrase_partial.csv")
@@ -53,6 +49,10 @@ def run_from_params(
         augment_fn=augment_fn,
         aug_file_path=aug_file,
         augmentation_type="paraphrase",
+        sim_min=PARA_SIM_MIN,
+        sim_max=PARA_SIM_MAX,
+        min_len_ratio=PARA_MIN_LEN_RATIO,
+        max_len_ratio=PARA_MAX_LEN_RATIO,
     )
 
     df_full = pd.concat([df, df_aug[["label", "text"]]], ignore_index=True)
@@ -65,10 +65,10 @@ def run_from_params(
 
 def main():
     parser = argparse.ArgumentParser(description="Paraphrase augmentation")
-    parser.add_argument("--train",      required=True,  help="Path to train CSV")
-    parser.add_argument("--output-dir", required=True,  help="Directory for output files")
-    parser.add_argument("--single",     default=None,   help="Single text to paraphrase")
-    parser.add_argument("--seed",       type=int,       default=42, help="Random seed for reproducibility")
+    parser.add_argument("--train",      required=True, help="Path to train CSV")
+    parser.add_argument("--output-dir", required=True, help="Directory for output files")
+    parser.add_argument("--single",     default=None,  help="Single text to paraphrase")
+    parser.add_argument("--seed",       type=int,      default=42)
     args = parser.parse_args()
 
     if args.single:
@@ -85,7 +85,6 @@ def main():
             train_file=args.train,
             output_dir=args.output_dir,
             seed=args.seed,
-            single_text=None,
         )
 
 

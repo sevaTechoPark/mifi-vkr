@@ -16,6 +16,8 @@ from transformers import (
     Trainer,
     TrainerCallback,
     EarlyStoppingCallback,
+    TrainerControl,
+    TrainerState,
 )
 
 from bert_embeddings.config import MLMConfig, ensure_dir
@@ -66,7 +68,6 @@ class CustomMLMCheckpointCallback(TrainerCallback):
         epoch_num = int(round(state.epoch))
         eval_loss = metrics.get("eval_loss")
 
-        # отслеживаем лучшую эпоху (для метрик), но НЕ сохраняем веса здесь
         if eval_loss is not None and eval_loss < self.best_eval_loss:
             self.best_eval_loss = eval_loss
             self.best_epoch = epoch_num
@@ -78,9 +79,8 @@ class CustomMLMCheckpointCallback(TrainerCallback):
 
     def on_train_end(self, args, state, control, model=None, **kwargs):
         """
-        Вызывается после trainer.train().
         К этому моменту load_best_model_at_end уже загрузил лучшие веса в model.
-        Сохраняем их как encoder-only best_model.
+        Сохраняем их как encoder-only best_model и сразу чистим _trainer_tmp.
         """
         if model is None:
             return control
@@ -98,6 +98,12 @@ class CustomMLMCheckpointCallback(TrainerCallback):
         save_encoder_only_from_mlm(model, self.best_model_dir, meta=meta)
         if self.tokenizer:
             self.tokenizer.save_pretrained(self.best_model_dir)
+
+        # сразу удаляем _trainer_tmp — он больше не нужен
+        trainer_tmp = self.output_dir / "_trainer_tmp"
+        if trainer_tmp.exists():
+            shutil.rmtree(trainer_tmp)
+            print(f"  Removed _trainer_tmp: {trainer_tmp}")
 
         return control
 
@@ -143,7 +149,6 @@ def run_from_params(
     cleanup_memory()
 
     output_dir = ensure_dir(output_dir)
-    final_model_dir = ensure_dir(output_dir / "final_model")
     metrics_path = output_dir / "metrics.json"
 
     raw_df = build_mlm_corpus(train_file, test_file, text_col=cfg.text_col)
@@ -175,8 +180,10 @@ def run_from_params(
     def build_meta():
         return {k: getattr(cfg, k) for k in MLMConfig.__dataclass_fields__}
 
+    trainer_tmp_dir = str(output_dir / "_trainer_tmp")
+
     training_args = TrainingArguments(
-        output_dir=str(output_dir / "_trainer_tmp"),
+        output_dir=trainer_tmp_dir,
         per_device_train_batch_size=cfg.train_batch_size,
         per_device_eval_batch_size=cfg.eval_batch_size,
         learning_rate=cfg.learning_rate,
@@ -185,7 +192,8 @@ def run_from_params(
         warmup_ratio=cfg.warmup_ratio,
         logging_steps=cfg.logging_steps,
         eval_strategy="epoch",
-        save_strategy="epoch",               # нужно для load_best_model_at_end
+        save_strategy="epoch",
+        save_total_limit=1,          # держим только 1 чекпоинт Trainer'а — экономим место
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -216,6 +224,8 @@ def run_from_params(
     )
 
     trainer.train()
+
+    # финальная оценка уже на лучшей модели (load_best_model_at_end=True)
     eval_metrics = trainer.evaluate()
 
     metrics = {
@@ -232,24 +242,16 @@ def run_from_params(
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
-    trainer.save_model(str(final_model_dir))
-    tokenizer.save_pretrained(str(final_model_dir))
-    save_encoder_only_from_mlm(
-        trainer.model,
-        final_model_dir,
-        meta={
-            **build_meta(),
-            "type": "mlm_domain_encoder_final",
-            "final_eval_loss": metrics["eval_loss"],
-            "final_perplexity": metrics["perplexity"],
-        },
-    )
+    # tokenizer уже сохранён в best_model/ через on_train_end,
+    # но на случай если on_train_end не сработал — сохраним ещё раз
+    best_model_dir = output_dir / "best_model"
+    if best_model_dir.exists():
+        tokenizer.save_pretrained(str(best_model_dir))
 
     components = {
         "output_dir": str(output_dir),
         "checkpoints_dir": str(output_dir / "checkpoints"),
-        "best_model_dir": str(output_dir / "best_model"),
-        "final_model_dir": str(final_model_dir),
+        "best_model_dir": str(best_model_dir),
         "metrics_path": str(metrics_path),
         "model_name": cfg.model_name,
     }
@@ -267,11 +269,8 @@ def run_from_params(
         f"perplexity={best_ppl:.4f}"
     )
     print(
-        f"  Final model → eval_loss={metrics['eval_loss']:.6f}, "
-        f"perplexity={metrics['perplexity']:.4f}"
+        f"  Best model dir : {components['best_model_dir']}"
     )
-    print(f"  Best model dir : {components['best_model_dir']}")
-    print(f"  Final model dir: {components['final_model_dir']}")
     print(f"  Metrics path   : {components['metrics_path']}")
     print("=" * 56)
 

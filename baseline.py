@@ -157,8 +157,9 @@ if __name__ == "__main__":
                  
 # bert-classification train_backtranslate_2.csv balanced_accuracy: 0.441557, macro_f1: 0.450440
 # bert-classification train_backtranslate_3.csv balanced_accuracy: 0.388507, macro_f1: 0.382487
-# bert-classification train_augmented_3 balanced_accuracy: 0.463967, macro_f1: 0.470460
-           
+# bert-classification train_augmented_3 balanced_accuracy: 0.463967, macro_f1: 0.470460 
+# bert-classification train_augmented_original_plus_summary_3 balanced_accuracy: 0.027778, macro_f1: 0.006495
+
 # --- Композитный вектор
 
 python -m hybrid.main build \
@@ -168,14 +169,25 @@ python -m hybrid.main build \
   --model_dir /Users/v.papadyk/ml/mifi-vkr/bert_embeddings/best_model \
   --device cpu
 
+python -m hybrid.main build \
+  --train /Users/v.papadyk/ml/mifi-vkr/data/train_augmented_3.csv \
+  --test /Users/v.papadyk/ml/mifi-vkr/data/test.csv \
+  --outdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
+  --device cpu
+
 python -m hybrid.main classical \
   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec
 
 # train_augmented
 # linear_svc {'balanced_accuracy': 0.340786, 'macro_f1': 0.321917}
 # logreg {'balanced_accuracy': 0.390829, 'macro_f1': 0.389622}
-# train_augmented_3
-
+# fine-tune train_augmented_3
+# linear_svc: {'balanced_accuracy': 0.155629, 'macro_f1': 0.152774}
+# logreg: {'balanced_accuracy': 0.270957, 'macro_f1': 0.27713}
+# original train_augmented_3
+# linear_svc: {'balanced_accuracy': 0.288799, 'macro_f1': 0.302895}
+# logreg: {'balanced_accuracy': 0.300821, 'macro_f1': 0.300796
+         
 python -m hybrid.main mlp \
   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --epochs 40 \
@@ -183,8 +195,10 @@ python -m hybrid.main mlp \
 
 # train_augmented
 # balanced_accuracy: 0.447552, macro_f1: 0.433175
-# train_augmented_3
-
+# fine-tune train_augmented_3:
+# balanced_accuracy: 0.32539, macro_f1: 0.345667
+# original train_augmented_3
+# balanced_accuracy: 0.387764, macro_f1: 0.400307
 
 # ---- Косинусное сходство
 

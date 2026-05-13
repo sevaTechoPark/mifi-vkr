@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
-from ..common.masks import mask_placeholders, unmask_placeholders, placeholders_intact
+from ..common.masks import mask_placeholders, unmask_placeholders
 from ..common.config import SIM_MIN, SIM_MAX
 
 

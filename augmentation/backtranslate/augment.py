@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 
 from .translate import safe_translate, clean_bt_result
 from ..common.masks import mask_placeholders, unmask_placeholders
-from ..common.text_utils import preprocess_text
+from ..common.text_utils import preprocess_text, clean_generated_text
 from ..common.perplexity import rugpt_perplexity_list
 from ..common.config import SIM_MIN, SIM_MAX
 
@@ -78,5 +78,7 @@ def back_translate_document(
 
     result_masked = " ".join(bt_sentences)
     bt_text = unmask_placeholders(result_masked, mapping)
+
+    bt_text = clean_generated_text(bt_text)
 
     return bt_text

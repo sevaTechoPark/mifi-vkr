@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
 from ..common.masks import mask_placeholders, unmask_placeholders
-from ..common.text_utils import preprocess_text
+from ..common.text_utils import preprocess_text, preprocess_text
 from ..common.config import SIM_MIN, SIM_MAX
 
 
@@ -25,25 +25,17 @@ def generate_paraphrase(text: str, tok, model, device, **kwargs) -> str:
     if src_len > 400:
         raise ValueError(f"Input too long: {src_len} tokens.")
 
-    if src_len < 30:
-        min_len = max(2, int(src_len * 0.7))
-        max_len = min(512, int(src_len * 1.5))
-        default_temp, default_top_p = 0.95, 0.92
-    else:
-        min_len = max(2, int(src_len * 0.5))
-        max_len = min(512, max(min_len + 1, int(src_len * 2.0)))
-        default_temp, default_top_p = 1.1, 0.90
+    # длину держим близко к оригиналу
+    max_len = int(src_len * 1.5 + 10)
+    min_len = max(2, int(src_len * 0.7))
 
     gen_kwargs = {
-        "encoder_no_repeat_ngram_size": 3,
-        "max_length": max_len,
-        "min_length": min_len,
-        "no_repeat_ngram_size": 3,
-        "do_sample": True,
-        "num_return_sequences": 1,
-        "top_k": 50,
-        "top_p": kwargs.pop("top_p", default_top_p),
-        "temperature": kwargs.pop("temperature", default_temp),
+        "encoder_no_repeat_ngram_size": kwargs.pop("encoder_no_repeat_ngram_size", 4),
+        "num_beams": kwargs.pop("num_beams", 5),
+        "do_sample": kwargs.pop("do_sample", False),  # КЛЮЧЕВОЕ: без сэмплинга
+        "max_length": kwargs.pop("max_length", max_len),
+        "min_length": kwargs.pop("min_length", min_len),
+        # no_repeat_ngram_size можно оставить 3, но при encoder_no_repeat часто не нужен
     }
     gen_kwargs.update(kwargs)
 
@@ -108,65 +100,23 @@ def generate_best_paraphrase(
     embed_model: SentenceTransformer,
     device: torch.device,
 ) -> tuple[str, float]:
-    src_len = tokens_len(source_text, tok, device)
-    is_short = src_len < 70
-    n_samples  = 7 if is_short else 3
-    max_retries = 5 if is_short else 3
-    base_temp  = 0.95 if is_short else 1.1
-
+    """
+    Консервативная версия:
+    - один детерминированный перефраз (beam search),
+    - считаем cosine с исходником,
+    - возвращаем (paraphrase, sim), а фильтрация происходит снаружи.
+    """
     source_emb = embed_model.encode(
         source_text, convert_to_tensor=True, normalize_embeddings=True
     )
 
-    best_fallback_text = None
-    best_fallback_sim  = -1.0
+    para_text = generate_paraphrase(source_text, tok, model, device)
+    para_emb = embed_model.encode(
+        para_text, convert_to_tensor=True, normalize_embeddings=True
+    )
 
-    for retry in range(max_retries):
-        if retry == 0 and is_short:
-            candidates = [
-                generate_paraphrase(source_text, tok, model, device,
-                                    temperature=base_temp, top_k=30, top_p=0.85,
-                                    repetition_penalty=1.1)
-                for _ in range(n_samples)
-            ]
-        elif retry == 0:
-            candidates = [
-                generate_paraphrase(source_text, tok, model, device)
-                for _ in range(n_samples)
-            ]
-        elif is_short or max_retries - retry == 1:
-            temp = base_temp + 0.05 * retry
-            candidates = [
-                generate_paraphrase(source_text, tok, model, device,
-                                    temperature=temp, top_k=30, top_p=0.85,
-                                    repetition_penalty=1.1)
-                for _ in range(n_samples)
-            ]
-        else:
-            temp = base_temp + 0.1 * retry
-            candidates = [
-                generate_paraphrase(source_text, tok, model, device, temperature=temp)
-                for _ in range(n_samples)
-            ]
-
-        cand_embs = embed_model.encode(
-            candidates, convert_to_tensor=True, normalize_embeddings=True
-        )
-        sims = util.cos_sim(source_emb, cand_embs)[0]
-
-        cur_best = torch.argmax(sims).item()
-        if sims[cur_best].item() > best_fallback_sim:
-            best_fallback_sim  = sims[cur_best].item()
-            best_fallback_text = candidates[cur_best]
-
-        mask = (sims >= SIM_MIN) & (sims <= SIM_MAX)
-        if mask.any():
-            idxs = torch.nonzero(mask, as_tuple=False).squeeze(1)
-            best_in_mask = torch.argmax(sims[idxs]).item()
-            best_idx = idxs[best_in_mask].item()
-            return candidates[best_idx], sims[best_idx].item()
-
-    return best_fallback_text, best_fallback_sim
+    sim = util.cos_sim(source_emb, para_emb)[0].item()
+    return para_text, sim
 
 
 def paraphrase_document(
@@ -201,6 +151,8 @@ def paraphrase_document(
 
     result_masked = " ".join(paraphrased_sentences)
     para_text = unmask_placeholders(result_masked, mapping)
+
+    para_text = clean_generated_text(para_text)
 
     return para_text
     

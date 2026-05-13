@@ -12,7 +12,7 @@ BT_MIN_LEN_RATIO = 0.50
 BT_MAX_LEN_RATIO = 1.50
 
 # ── Paraphrase ─────────────────────────────────────────────────────
-PARA_SIM_MIN = 0.85
+PARA_SIM_MIN = 0.79
 PARA_SIM_MAX = 0.97
 
 # сколько символов считаем "коротким" исходником
@@ -20,6 +20,6 @@ SHORT_TEXT_THRESHOLD = 400
 
 # минимальное отношение длины paraphrase/source для коротких текстов
 PARAPHRASE_MIN_LEN_RATIO_SHORT = 0.40
-PARA_MIN_LEN_RATIO = 0.70
+PARA_MIN_LEN_RATIO = 0.65
 PARA_MAX_LEN_RATIO = 1.30
 

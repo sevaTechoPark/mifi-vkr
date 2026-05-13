@@ -13,7 +13,6 @@ def _get_tokens(text: str, tok, device: torch.device):
 def tokens_len(text: str, tok, device: torch.device) -> int:
     return _get_tokens(text, tok, device).input_ids.shape[1]
 
-
 def split_long_sentence(
     sent: str,
     tok,

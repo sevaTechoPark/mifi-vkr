@@ -48,6 +48,18 @@ _COLON_NOISE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Кириллические PH-артефакты: ПН-5, ПС_12, ПХ-3, ФХ_7 и т.п.
+_CYR_PH_GARBAGE_PATTERN = re.compile(
+    r"\b[ПФХКРС][НСХ][\-_]?\d+\b",
+    re.IGNORECASE,
+)
+
+# Хвостовые артефакты «Включен и подписан на марку ...» и «Дата начала/окончания поиска»
+_TRAILING_ARTIFACT_PATTERN = re.compile(
+    r"(?:включен\s+и\s+подписан\s+на\s+марку|дата\s+(?:начала|окончания)\s+поиска|Империалист)\W*$",
+    re.IGNORECASE,
+)
+
 # одиночные незначимые символы или их цепочки: "Щ Щ Щ", "*", "[]", "♪", "{>", "#>"
 _SYMBOL_NOISE_PATTERN = re.compile(
     r"""
@@ -136,15 +148,20 @@ def clean_generated_text(text: str) -> str:
     # вычищаем PH-артефакты
     text = _PH_GARBAGE_PATTERN.sub("", text)
 
+    text = _CYR_PH_GARBAGE_PATTERN.sub("", text)
+
     # схлопываем повторяющиеся токены/фразы
     text = _dedup_repeated_tokens(text)
 
     # нормализуем пробелы
     text = _SPACES_PATTERN.sub(" ", text)
+
+    text = _TRAILING_ARTIFACT_PATTERN.sub("", text)
+
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
 
     # убираем «висячие» начальные пунктуационные цепочки вида ";,." в начале текста
-    text = re.sub(r"^[;:,.\s]+", "", text)
+    text = re.sub(r"^[;:,.\s]+", "", text)    
 
     return text.strip()
 

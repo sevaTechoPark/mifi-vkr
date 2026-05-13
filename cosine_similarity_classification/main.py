@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from cosine_similarity_classification.config import (
     MODEL_DIR,
@@ -34,6 +35,19 @@ def _test_has_label_column(test_file, label_col):
     return label_col in test_head.columns
 
 
+def _detect_device(device=None):
+    if device is not None:
+        device = str(device).strip().lower()
+        if device:
+            return device
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def run_from_params(
     train_file,
     test_file,
@@ -52,7 +66,17 @@ def run_from_params(
 ):
     train_file = str(Path(train_file).expanduser())
     test_file = str(Path(test_file).expanduser())
-    model_dir = str(Path(model_dir).expanduser()) if str(model_dir).strip() else ""
+
+    if model_dir is None:
+        model_dir = ""
+    else:
+        model_dir = str(model_dir).strip()
+        if model_dir:
+            model_dir = str(Path(model_dir).expanduser())
+        else:
+            model_dir = ""
+
+    device = _detect_device(device)
 
     test_has_labels = _test_has_label_column(test_file, label_col)
 
@@ -144,6 +168,8 @@ def run_from_params(
         "pred_scores": pred_scores,
     }
 
+    print(f"[INFO] Using device: {device}")
+
     if test_has_labels:
         print(f"balanced_accuracy: {metrics['balanced_accuracy']:.6f}")
         print(f"macro_f1: {metrics['macro_f1']:.6f}")
@@ -159,15 +185,15 @@ def build_argparser():
     parser = argparse.ArgumentParser(
         description="Cosine similarity classification over embeddings"
     )
-    parser.add_argument("--train", type=Path, required=True, help="Path to train CSV")
-    parser.add_argument("--test", type=Path, required=True, help="Path to test CSV")
+    parser.add_argument("--train", type=str, required=True, help="Path to train CSV")
+    parser.add_argument("--test", type=str, required=True, help="Path to test CSV")
     parser.add_argument(
         "--model-dir",
-        type=Path,
-        default=Path(MODEL_DIR) if MODEL_DIR else Path(""),
+        type=str,
+        default=MODEL_DIR,
         help="Directory with local embedding model weights",
     )
-    parser.add_argument("--device", type=str, default=DEVICE)
+    parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--base-model-name", type=str, default=BASE_MODEL_NAME)
     parser.add_argument("--text-col", type=str, default=TEXT_COLUMN)
     parser.add_argument("--label-col", type=str, default=LABEL_COLUMN)

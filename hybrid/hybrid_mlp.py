@@ -275,7 +275,8 @@ def run_mlp(vecdir, epochs=25, device="cpu"):
     }
 
     print("\nBEST RESULT")
-    print(json.dumps(results, ensure_ascii=False, indent=2))
+    print(best_metrics)
+    json.dumps(results, ensure_ascii=False, indent=2)
     return results
 
 

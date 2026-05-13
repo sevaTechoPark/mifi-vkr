@@ -1,3 +1,5 @@
+# Датасеты
+
 ## Формируем train.csv/test.csv по original_data.json
 
 mkdir -p ~/papadyk-vkr/data
@@ -54,8 +56,6 @@ python -m text_summarization.main \
 
 # Классификация
 
-Можно попробовать в местах --device cpu передавать --device cuda, но я не проверял эту работу, потому что нет такого девайса.
-
 ## I baseline
 
 ```
@@ -72,8 +72,7 @@ python baseline.py \
 python -m hybrid.main build \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --output-dir ~/papadyk-vkr/data/hybrid_vec \
-  --device cpu
+  --output-dir ~/papadyk-vkr/data/hybrid_vec
 ```
 
 Можно запускать эти два блока параллельно.  
@@ -90,15 +89,19 @@ MLP:
 ```
 python -m hybrid.main mlp \
   --vecdir ~/papadyk-vkr/data/hybrid_vec \
-  --epochs 40 \
-  --device cpu
-  ```
+  --epochs 40
+```
 
 ## III Косинусное расстоение
 
 ```
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
-  --test ~/papadyk-vkr/data/test.csv \
-  --device cpu
+  --test ~/papadyk-vkr/data/test.csv
+```
+
+## IV Классификация бертом
+
+```
+
 ```

@@ -1,6 +1,8 @@
 import argparse
 from dataclasses import fields, replace
 
+import torch
+
 from .config import HybridModelConfig, HybridDataConfig, HybridPathConfig
 from .hybrid_vector_build import run_build
 from .hybrid_classical_models import run_classical
@@ -37,6 +39,19 @@ def _override_dataclass_from_args(cfg, args, allowed_fields):
             if value is not None:
                 updates[name] = value
     return replace(cfg, **updates)
+
+
+def _detect_device(device=None):
+    if device is not None:
+        device = str(device).strip().lower()
+        if device:
+            return device
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def build_configs_from_args(args):
@@ -81,18 +96,21 @@ def build_parser():
     build_parser.add_argument("--test-file", required=True)
     build_parser.add_argument("--output-dir", required=True)
     build_parser.add_argument("--model-dir", default=None)
-    build_parser.add_argument("--device", default="cpu")
+    build_parser.add_argument("--device", default=None)
 
     _add_dataclass_args(build_parser, HybridModelConfig)
     _add_dataclass_args(build_parser, HybridDataConfig)
 
-    classical_parser = subparsers.add_parser("classical", help="Run classical models on hybrid vectors")
+    classical_parser = subparsers.add_parser(
+        "classical",
+        help="Run classical models on hybrid vectors",
+    )
     classical_parser.add_argument("--vecdir", required=True)
 
     mlp_parser = subparsers.add_parser("mlp", help="Run MLP on hybrid vectors")
     mlp_parser.add_argument("--vecdir", required=True)
     mlp_parser.add_argument("--epochs", type=int, default=25)
-    mlp_parser.add_argument("--device", default="cpu")
+    mlp_parser.add_argument("--device", default=None)
 
     return parser
 
@@ -103,20 +121,25 @@ def main():
 
     if args.command == "build":
         model_cfg, data_cfg, path_cfg = build_configs_from_args(args)
+        device = _detect_device(args.device)
+        print(f"[INFO] Using device: {device}")
 
         run_build(
             train_file=path_cfg.train_file,
             test_file=path_cfg.test_file,
             outdir=path_cfg.output_dir,
             model_dir=args.model_dir,
-            device=args.device,
+            device=device,
             model_cfg=model_cfg,
             data_cfg=data_cfg,
         )
     elif args.command == "classical":
         run_classical(args.vecdir)
     elif args.command == "mlp":
-        run_mlp(args.vecdir, epochs=args.epochs, device=args.device)
+        device = _detect_device(args.device)
+        print(f"[INFO] Using device: {device}")
+
+        run_mlp(args.vecdir, epochs=args.epochs, device=device)
     else:
         raise ValueError(f"Unknown command: {args.command}")
 

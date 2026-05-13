@@ -200,9 +200,5 @@ def paraphrase_document(
     result_masked = " ".join(paraphrased_sentences)
     para_text = unmask_placeholders(result_masked, mapping)
 
-    # safety-check: если плейсхолдеры нарушены, лучше вернуть исходный текст
-    if not placeholders_intact(source_text, para_text):
-        return source_text
-
     return para_text
     

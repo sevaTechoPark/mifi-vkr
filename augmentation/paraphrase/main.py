@@ -4,11 +4,11 @@ import os
 import torch
 import pandas as pd
 
-from common.embeddings import load_embed_model
-from common.augment_loop import run_augmentation_loop
-from common.seed import set_seed, get_seed_or_default
-from paraphrase.models import load_paraphrase_model
-from paraphrase.augment import paraphrase_document
+from ..common.embeddings import load_embed_model
+from ..common.augment_loop import run_augmentation_loop
+from ..common.seed import set_seed, get_seed_or_default
+from .models import load_paraphrase_model
+from .augment import paraphrase_document
 
 
 def build_augment_fn(tok, model, embed_model, device):

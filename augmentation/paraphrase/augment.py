@@ -4,9 +4,9 @@ from razdel import sentenize
 from tqdm.auto import tqdm
 from sentence_transformers import SentenceTransformer, util
 
-from paraphrase.models import load_paraphrase_model
-from common.masks import mask_placeholders, unmask_placeholders
-from common.config import SIM_MIN, SIM_MAX
+from .models import load_paraphrase_model
+from ..common.masks import mask_placeholders, unmask_placeholders
+from ..common.config import SIM_MIN, SIM_MAX
 
 
 def _get_tokens(text: str, tok, device):

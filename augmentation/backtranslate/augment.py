@@ -3,12 +3,10 @@ from sentence_transformers import SentenceTransformer, util
 from razdel import sentenize
 from tqdm.auto import tqdm
 
-from backtranslate.translate import (
-    safe_translate, clean_bt_result, preprocess_before_translate
-)
-from common.masks import mask_placeholders, unmask_placeholders
-from common.perplexity import rugpt_perplexity_list
-from common.config import SIM_MIN, SIM_MAX
+from .translate import safe_translate, clean_bt_result, preprocess_before_translate
+from ..common.masks import mask_placeholders, unmask_placeholders
+from ..common.perplexity import rugpt_perplexity_list
+from ..common.config import SIM_MIN, SIM_MAX
 
 LANG_PAIRS = [("ru-en", "en-ru"), ("ru-fr", "fr-ru"), ("ru-es", "es-ru")]
 

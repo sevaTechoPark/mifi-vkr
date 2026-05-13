@@ -1,7 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from common.config import RUGPT_MODEL_NAME
-
+from .config import RUGPT_MODEL_NAME
 
 def load_rugpt(device: torch.device):
     tok = AutoTokenizer.from_pretrained(RUGPT_MODEL_NAME)

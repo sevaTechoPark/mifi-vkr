@@ -1,7 +1,6 @@
 import torch
 from sentence_transformers import SentenceTransformer, util
-from common.config import EMBED_MODEL_NAME
-
+from .config import EMBED_MODEL_NAME
 
 def load_embed_model(device: torch.device) -> SentenceTransformer:
     return SentenceTransformer(EMBED_MODEL_NAME, device=device)

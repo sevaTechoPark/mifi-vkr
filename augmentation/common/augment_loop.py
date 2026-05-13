@@ -9,8 +9,8 @@ import torch
 from tqdm.auto import tqdm
 from sentence_transformers import util, SentenceTransformer
 
-from common.config import TARGET_PER_CLASS, SIM_MIN, SIM_MAX, SIM_LABEL_MIN, SIM_LABEL_MAX
-from common.embeddings import cos_sim
+from .config import TARGET_PER_CLASS, SIM_MIN, SIM_MAX, SIM_LABEL_MIN, SIM_LABEL_MAX
+from .embeddings import cos_sim
 
 
 def normalize_text(text: str) -> str:

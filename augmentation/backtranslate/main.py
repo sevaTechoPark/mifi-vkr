@@ -1,15 +1,13 @@
-# backtranslate/main.py
 import argparse
 import os
 import torch
 import pandas as pd
 
-from common.embeddings import load_embed_model
-from common.perplexity import load_rugpt
-from common.augment_loop import run_augmentation_loop
-from common.seed import set_seed, get_seed_or_default
-from backtranslate.augment import back_translate_document
-
+from ..common.embeddings import load_embed_model
+from ..common.perplexity import load_rugpt
+from ..common.augment_loop import run_augmentation_loop
+from ..common.seed import set_seed, get_seed_or_default
+from .augment import back_translate_document
 
 def build_augment_fn(embed_model, rugpt_tok, rugpt_model, device):
     def augment_fn(text: str) -> str:

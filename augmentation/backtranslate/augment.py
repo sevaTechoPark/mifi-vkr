@@ -3,9 +3,9 @@ from sentence_transformers import SentenceTransformer, util
 from razdel import sentenize
 from tqdm.auto import tqdm
 
-from .translate import safe_translate, clean_bt_result
+from .translate import safe_translate
 from ..common.masks import mask_placeholders, unmask_placeholders
-from ..common.text_utils import preprocess_text, clean_generated_text
+from ..common.text_utils import preprocess_text, clean_generated_text, clean_aug_result
 from ..common.perplexity import rugpt_perplexity_list
 from ..common.config import BT_SIM_MIN, BT_SIM_MAX
 
@@ -24,7 +24,7 @@ def generate_bt_candidates(text: str, device) -> list[str]:
         for cfg in GEN_MODES:
             mid = safe_translate(text, mode=src_lang, max_tokens=120, device=device, **cfg)
             bt  = safe_translate(mid,  mode=tgt_lang, max_tokens=300, device=device, **cfg)
-            candidates.append(clean_bt_result(bt))
+            candidates.append(clean_aug_result(bt))
     return list(dict.fromkeys([c.strip() for c in candidates if c.strip()]))
 
 

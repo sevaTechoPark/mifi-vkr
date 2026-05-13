@@ -69,3 +69,16 @@ def is_highly_formal(text: str) -> bool:
     if has_rekviz and (digit_ratio > 0.2 or upper_ratio > 0.3):
         return True
     return False
+
+def clean_aug_result(text: str) -> str:
+    """
+    Лёгкая пост-обработка результатов генерации/перевода:
+    - схлопываем повторяющиеся знаки препинания,
+    - чистим пробелы вокруг запятых,
+    - убираем лишние пробелы.
+    """
+    text = re.sub(r"([,.!?])\1{2,}", r"\1", text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+,", ",", text)
+    text = re.sub(r",\s*", ", ", text)
+    return text.strip()

@@ -137,17 +137,3 @@ def safe_translate(text: str, mode: str, max_tokens: int, device: torch.device, 
             out_chunks.append(generate_translate(ch, mode=mode, device=device, **gen_kwargs))
 
     return " ".join(out_chunks)
-
-
-def clean_bt_result(text: str) -> str:
-    """
-    Лёгкая пост-обработка результатов обратного перевода:
-    - схлопываем повторяющиеся знаки препинания,
-    - чистим пробелы вокруг запятых,
-    - убираем лишние пробелы.
-    """
-    text = re.sub(r"([,.!?])\1{2,}", r"\1", text)
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\s+,", ",", text)
-    text = re.sub(r",\s*", ", ", text)
-    return text.strip()

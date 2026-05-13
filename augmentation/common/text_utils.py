@@ -66,6 +66,12 @@ _TRAILING_ARTIFACT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# последовательности из трёх и более одинаковых одиночных небуквенно-цифровых символов,
+# разделённых пробелами: "- - - - - -", ". . . .", "/ / /", ": : :" и т.п.
+_PUNCT_SEQ_WITH_SPACES_PATTERN = re.compile(
+    r"(?:\s*([^\w\s])\s*){3,}"
+)
+
 
 # одиночные незначимые символы или их цепочки: "Щ Щ Щ", "*", "[]", "♪", "{>", "#>"
 _SYMBOL_NOISE_PATTERN = re.compile(
@@ -171,6 +177,9 @@ def clean_generated_text(text: str) -> str:
 
     # убираем чисто пунктуационные/цифровые фрагменты
     text = _PUNCT_ONLY_CHUNK_PATTERN.sub(" ", text)
+
+    # убираем последовательности из повторяющихся знаков с пробелами: "- - - -", ". . ."
+    text = _PUNCT_SEQ_WITH_SPACES_PATTERN.sub(" ", text)
 
     # убираем пустые скобки
     text = _EMPTY_PARENS_PATTERN.sub(" ", text)

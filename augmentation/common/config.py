@@ -12,8 +12,8 @@ BT_MIN_LEN_RATIO = 0.50
 BT_MAX_LEN_RATIO = 1.50
 
 # ── Paraphrase ─────────────────────────────────────────────────────
-PARA_SIM_MIN = 0.79
-PARA_SIM_MAX = 0.97
+PARA_SIM_MIN = 0.75
+PARA_SIM_MAX = 0.95
 
 # сколько символов считаем "коротким" исходником
 SHORT_TEXT_THRESHOLD = 400

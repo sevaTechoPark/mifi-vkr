@@ -25,11 +25,6 @@ def is_length_ok(
     min_len_ratio: float,
     max_len_ratio: float,
 ) -> bool:
-    """
-    Адаптивная проверка длины:
-    - для paraphrase коротких текстов (len < SHORT_TEXT_THRESHOLD) снижаем нижний порог,
-    - для остальных случаев используем min_len_ratio/max_len_ratio как есть.
-    """
     len_src = len(source_text)
     len_aug = len(aug_text)
 
@@ -37,15 +32,16 @@ def is_length_ok(
         return False
 
     len_ratio = len_aug / len_src
-
     effective_min = min_len_ratio
 
     if augmentation_type == "paraphrase":
         if len_src < SHORT_TEXT_THRESHOLD:
             effective_min = PARAPHRASE_MIN_LEN_RATIO_SHORT
+        elif len_src > 1000:
+            # для очень длинных — чуть мягче
+            effective_min = min(min_len_ratio * 0.9, 0.65)
 
     return effective_min <= len_ratio <= max_len_ratio
-
 
 def normalize_text(text: str) -> str:
     import re

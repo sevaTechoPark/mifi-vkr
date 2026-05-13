@@ -16,6 +16,7 @@ _URL_PATTERN = re.compile(r"https?://\S+")
 _MULTIPUNCT_PATTERN = re.compile(r"([,.;:!?])\1{1,}")
 _SPACES_PATTERN = re.compile(r"\s+")
 
+
 # расширенный паттерн PH-мусора: <PS_0>, <FH_10>, <PH_3>, HP_13, CRR итп
 _PH_GARBAGE_PATTERN = re.compile(
     r"""
@@ -32,8 +33,10 @@ _PH_GARBAGE_PATTERN = re.compile(
     re.VERBOSE,
 )
 
+
 # HTML-entities
 _HTML_ENTITY_PATTERN = re.compile(r"&(?:lt|gt|amp|quot|nbsp|apos);")
+
 
 # реквизитные заголовки без значимого содержания
 # ловит: "Телефон:", "e-mail:", "mail:", "адрес:", "бухгалтерия тел.:", "пто тел.:"
@@ -42,11 +45,13 @@ _LABEL_NOISE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# паразитные строки вида "должность: - должность:" или ": и." или ":,"
+
+# паразитные строки вида "должность: - должность:" или "контактный телефон: -"
 _COLON_NOISE_PATTERN = re.compile(
     r"(?:должность|контактный телефон|контакт)\s*:\s*[-—]*\s*",
     re.IGNORECASE,
 )
+
 
 # Кириллические PH-артефакты: ПН-5, ПС_12, ПХ-3, ФХ_7 и т.п.
 _CYR_PH_GARBAGE_PATTERN = re.compile(
@@ -54,11 +59,13 @@ _CYR_PH_GARBAGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+
 # Хвостовые артефакты «Включен и подписан на марку ...» и «Дата начала/окончания поиска»
 _TRAILING_ARTIFACT_PATTERN = re.compile(
     r"(?:включен\s+и\s+подписан\s+на\s+марку|дата\s+(?:начала|окончания)\s+поиска|Империалист)\W*$",
     re.IGNORECASE,
 )
+
 
 # одиночные незначимые символы или их цепочки: "Щ Щ Щ", "*", "[]", "♪", "{>", "#>"
 _SYMBOL_NOISE_PATTERN = re.compile(
@@ -80,14 +87,34 @@ _SYMBOL_NOISE_PATTERN = re.compile(
     re.VERBOSE,
 )
 
+
 # коннекторы без содержимого: "и:", "или:" в хвостах
 _CONNECTIVE_LABEL_NOISE_PATTERN = re.compile(
     r"\b(?:и|или)\s*:\s*(?=[,;.!\s]|$)",
     re.IGNORECASE,
 )
 
-# короткие "англоязычные" строки / хвосты без кириллицы — часто чистый мусор
+
+# куски, состоящие почти полностью из пунктуации/цифр/слэшей — явный мусор
+_PUNCT_ONLY_CHUNK_PATTERN = re.compile(
+    r"(?:\s*[.\-–—/\\]{2,}\s*|\s*[.\-–—/\\\d]{3,}\s*)"
+)
+
+
+# пустые или почти пустые скобки: "()", "( )"
+_EMPTY_PARENS_PATTERN = re.compile(r"\(\s*\)")
+
+
+# повторы коротких токенов с точкой: "и. и. состоится", "г.г.г.г."
+_SHORT_TOKEN_REPEAT_PATTERN = re.compile(
+    r"\b([А-ЯЁа-яёA-Za-z]{1,3}\.)\s+\1\b"
+)
+
+
 def _drop_pure_latin_short_lines(text: str) -> str:
+    """
+    Короткие "англоязычные" строки / хвосты без кириллицы — часто чистый мусор.
+    """
     lines = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -105,10 +132,10 @@ def _dedup_repeated_tokens(text: str) -> str:
     Схлопываем повторы типа 'Исполнитель: Исполнитель: Исполнитель'
     или 'Исполнитель: Исполнитель:' в одно.
     """
-    # повторяющиеся слова
-    text = re.sub(r"\b(\w+)(?:\s+\1\b){1,}", r"\1", text)
     # повторяющиеся пары с двоеточием: "Исполнитель: Исполнитель:" → "Исполнитель:"
     text = re.sub(r"\b(\w+:\s*)(\1){1,}", r"\1", text)
+    # повторяющиеся слова: "Покупатель Покупатель" → "Покупатель"
+    text = re.sub(r"\b(\w+)(?:\s+\1\b){1,}", r"\1", text)
     return text
 
 
@@ -118,7 +145,7 @@ def clean_generated_text(text: str) -> str:
     - раскодируем HTML-entities,
     - вырезаем короткие англоязычные артефактные строки,
     - убираем URL, хвосты "Телефон:, mail:, адрес: и:",
-    - чистим PH/PSG/CRR-артефакты, символический мусор и повторяющуюся пунктуацию,
+    - чистим PH/PSG/CRR-артефакты, символический и пунктуационный мусор,
     - аккуратно нормализуем пробелы и "висячие" хвосты.
     """
     # HTML entities → нормальные символы
@@ -142,12 +169,20 @@ def clean_generated_text(text: str) -> str:
     # убираем паразитные символы и цепочки
     text = _SYMBOL_NOISE_PATTERN.sub(" ", text)
 
+    # убираем чисто пунктуационные/цифровые фрагменты
+    text = _PUNCT_ONLY_CHUNK_PATTERN.sub(" ", text)
+
+    # убираем пустые скобки
+    text = _EMPTY_PARENS_PATTERN.sub(" ", text)
+
+    # схлопываем повторы коротких токенов с точкой ("и. и." → "и.")
+    text = _SHORT_TOKEN_REPEAT_PATTERN.sub(r"\1", text)
+
     # схлопываем повторяющуюся пунктуацию
     text = _MULTIPUNCT_PATTERN.sub(r"\1", text)
 
     # вычищаем PH-артефакты
     text = _PH_GARBAGE_PATTERN.sub("", text)
-
     text = _CYR_PH_GARBAGE_PATTERN.sub("", text)
 
     # схлопываем повторяющиеся токены/фразы
@@ -156,12 +191,14 @@ def clean_generated_text(text: str) -> str:
     # нормализуем пробелы
     text = _SPACES_PATTERN.sub(" ", text)
 
+    # чистим хвостовые артефакты типа "Дата окончания поиска ..."
     text = _TRAILING_ARTIFACT_PATTERN.sub("", text)
 
+    # убираем пробелы перед пунктуацией
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
 
     # убираем «висячие» начальные пунктуационные цепочки вида ";,." в начале текста
-    text = re.sub(r"^[;:,.\s]+", "", text)    
+    text = re.sub(r"^[;:,.\s]+", "", text)
 
     return text.strip()
 

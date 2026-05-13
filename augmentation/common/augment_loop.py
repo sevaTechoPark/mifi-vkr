@@ -9,8 +9,42 @@ import torch
 from tqdm.auto import tqdm
 from sentence_transformers import util, SentenceTransformer
 
-from .config import TARGET_PER_CLASS, SIM_LABEL_MIN, SIM_LABEL_MAX
+from .config import (
+    TARGET_PER_CLASS,
+    SIM_LABEL_MIN,
+    SIM_LABEL_MAX,
+    SHORT_TEXT_THRESHOLD,
+    PARAPHRASE_MIN_LEN_RATIO_SHORT,
+)
 from .embeddings import cos_sim
+
+def is_length_ok(
+    source_text: str,
+    aug_text: str,
+    augmentation_type: str,
+    min_len_ratio: float,
+    max_len_ratio: float,
+) -> bool:
+    """
+    Адаптивная проверка длины:
+    - для paraphrase коротких текстов (len < SHORT_TEXT_THRESHOLD) снижаем нижний порог,
+    - для остальных случаев используем min_len_ratio/max_len_ratio как есть.
+    """
+    len_src = len(source_text)
+    len_aug = len(aug_text)
+
+    if len_src == 0:
+        return False
+
+    len_ratio = len_aug / len_src
+
+    effective_min = min_len_ratio
+
+    if augmentation_type == "paraphrase":
+        if len_src < SHORT_TEXT_THRESHOLD:
+            effective_min = PARAPHRASE_MIN_LEN_RATIO_SHORT
+
+    return effective_min <= len_ratio <= max_len_ratio
 
 
 def normalize_text(text: str) -> str:
@@ -89,15 +123,22 @@ def run_augmentation_loop(
 
             aug_text = augment_fn(source_text)
 
-            # фильтр по длине
+                        # фильтр по длине (адаптивный для коротких текстов / paraphrase)
             len_src = len(source_text)
             len_aug = len(aug_text)
-            len_ratio = len_aug / len_src
+            len_ratio = len_aug / len_src if len_src > 0 else 0.0
 
-            if not (min_len_ratio <= len_ratio <= max_len_ratio):
+            if not is_length_ok(
+                source_text=source_text,
+                aug_text=aug_text,
+                augmentation_type=augmentation_type,
+                min_len_ratio=min_len_ratio,
+                max_len_ratio=max_len_ratio,
+            ):
                 print(
                     f"[SKIP] длина aug/source = {len_ratio:.2f} "
-                    f"(ожидалось [{min_len_ratio}, {max_len_ratio}])"
+                    f"(ожидалось [{min_len_ratio}, {max_len_ratio}], "
+                    f"тип={augmentation_type}, len_src={len_src})"
                 )
                 orig_idx = (orig_idx + 1) % orig_count
                 continue
@@ -136,7 +177,7 @@ def run_augmentation_loop(
                 "augmentation_type": augmentation_type,
             })
 
-            if len(aug_rows) % 10 == 0:
+            if len(aug_rows) % 5 == 0:
                 pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)
                 print(f"Сохранено {len(aug_rows)} примеров")
 

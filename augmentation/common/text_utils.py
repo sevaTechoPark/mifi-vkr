@@ -50,23 +50,26 @@ def is_highly_formal(text: str) -> bool:
     """
     Грубая эвристика: считаем текст 'формальным' (деловые письма с реквизитами),
     если:
-      - много цифр,
-      - много заглавных аббревиатур,
-      - присутствуют типичные реквизитные слова.
+      - текст достаточно длинный,
+      - явно есть реквизитные маркеры,
+      - очень большая доля цифр или заглавных.
     """
     digits = sum(ch.isdigit() for ch in text)
     uppers = sum(ch.isupper() for ch in text)
+    letters = sum(ch.isalpha() for ch in text)
+
+    if letters < 80:
+        # короткие тексты почти никогда не считаем "слишком формальными"
+        return False
 
     # отношение цифр/букв
-    letters = sum(ch.isalpha() for ch in text)
     digit_ratio = digits / max(1, letters)
     upper_ratio = uppers / max(1, letters)
 
     recviz_words = ["ОГРН", "ОКПО", "ОКТМО", "ОКВЭД", "ИНН", "КПП", "БИК", "р/с", "к/с"]
     has_rekviz = any(w in text for w in recviz_words)
 
-    # пороги можно подвинуть, это просто старт
-    if has_rekviz and (digit_ratio > 0.2 or upper_ratio > 0.3):
+    if has_rekviz and (digit_ratio > 0.35 or upper_ratio > 0.55):
         return True
     return False
 

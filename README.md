@@ -97,14 +97,14 @@ python -m hybrid.main mlp \
 ```
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
-  --test ~/papadyk-vkr/data/test.csv
+  --test ~/papadyk-vkr/data/test.csv \
   --method centroid
 ```
 
 ```
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
-  --test ~/papadyk-vkr/data/test.csv
+  --test ~/papadyk-vkr/data/test.csv \
   --method nearest
 ```
 

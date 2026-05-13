@@ -50,7 +50,6 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"[^\w\s]", "", text)
     return text
 
-
 def run_augmentation_loop(
     df: pd.DataFrame,
     embed_model: SentenceTransformer,
@@ -81,7 +80,6 @@ def run_augmentation_loop(
     else:
         print("Генерируем с нуля")
 
-    # сколько нужно добавить поверх уже существующих аугментаций
     initial_aug_len = len(aug_rows)
     total_to_add = max(0, TOTAL_AUGMENTED - initial_aug_len)
 
@@ -91,106 +89,174 @@ def run_augmentation_loop(
     }
     label_to_embs = {}
 
-    for label in tqdm(small_labels, desc="Labels"):
-        texts_orig = label_to_texts[label]
-        orig_count = len(texts_orig)
+    round_idx = 0
+    max_rounds = 20
 
-        label_aug_rows = [r for r in aug_rows if r["label"] == label]
-        current_count = orig_count + len(label_aug_rows)
-        need = TARGET_PER_CLASS - current_count
+    while round_idx < max_rounds:
+        round_idx += 1
 
-        print(f"\nLabel: {label} | есть {current_count}, нужно добить: {need}")
+        pending_labels = []
+        for label in small_labels:
+            orig_count = len(label_to_texts[label])
+            label_aug_count = sum(1 for r in aug_rows if r["label"] == label)
+            current_count = orig_count + label_aug_count
+            if current_count < TARGET_PER_CLASS:
+                pending_labels.append(label)
 
-        if need <= 0:
-            print(f"Лейбл {label} уже заполнен")
-            continue
+        if not pending_labels:
+            print(f"\nВсе малые классы добиты за {round_idx - 1} раунд(ов)")
+            break
 
-        if label not in label_to_embs:
-            label_to_embs[label] = embed_model.encode(
-                copy.deepcopy(texts_orig),
-                convert_to_tensor=True,
-                normalize_embeddings=True,
-            )
+        print(f"\n{'=' * 80}")
+        print(f"Раунд {round_idx}/{max_rounds}. Осталось лейблов: {len(pending_labels)}")
+        print(f"{'=' * 80}")
 
-        label_embs = label_to_embs[label]
-        orig_idx = 0
-        attempts = 0
-        max_attempts = need * 50
+        round_added_before = len(aug_rows)
 
-        while need > 0 and attempts < max_attempts:
-            attempts += 1
-            source_text = texts_orig[orig_idx]
+        for label in tqdm(pending_labels, desc=f"Labels round {round_idx}"):
+            texts_orig = label_to_texts[label]
+            orig_count = len(texts_orig)
 
-            aug_text = augment_fn(source_text)
+            label_aug_rows = [r for r in aug_rows if r["label"] == label]
+            current_count = orig_count + len(label_aug_rows)
+            need = TARGET_PER_CLASS - current_count
 
-            # фильтр по длине (адаптивный для коротких текстов / paraphrase)
-            len_src = len(source_text)
-            len_aug = len(aug_text)
-            len_ratio = len_aug / len_src if len_src > 0 else 0.0
+            print(f"\nLabel: {label} | есть {current_count}, нужно добить: {need}")
 
-            if not is_length_ok(
-                source_text=source_text,
-                aug_text=aug_text,
-                augmentation_type=augmentation_type,
-                min_len_ratio=min_len_ratio,
-                max_len_ratio=max_len_ratio,
-            ):
-                print(
-                    f"[SKIP] длина aug/source = {len_ratio:.2f} "
-                    f"(ожидалось [{min_len_ratio}, {max_len_ratio}], "
-                    f"тип={augmentation_type}, len_src={len_src})"
+            if need <= 0:
+                print(f"Лейбл {label} уже заполнен")
+                continue
+
+            if label not in label_to_embs:
+                label_to_embs[label] = embed_model.encode(
+                    copy.deepcopy(texts_orig),
+                    convert_to_tensor=True,
+                    normalize_embeddings=True,
                 )
-                orig_idx = (orig_idx + 1) % orig_count
-                continue
 
-            if normalize_text(aug_text) == normalize_text(source_text):
-                print(f"[SKIP] идентичен оригиналу")
-                orig_idx = (orig_idx + 1) % orig_count
-                continue
+            label_embs = label_to_embs[label]
 
-            original_cosine_sim = cos_sim(embed_model, source_text, aug_text)
-            if not (sim_min <= original_cosine_sim <= sim_max):
-                print(f"[SKIP] sim с source={original_cosine_sim:.4f}")
-                orig_idx = (orig_idx + 1) % orig_count
-                continue
+            attempts = 0
+            max_attempts = max(1, orig_count * 3)
+            orig_idx = 0
+            added_for_label_this_round = 0
 
-            new_emb = embed_model.encode(
-                aug_text, convert_to_tensor=True, normalize_embeddings=True
+            while need > 0 and attempts < max_attempts:
+                attempts += 1
+                source_text = texts_orig[orig_idx]
+
+                aug_text = augment_fn(source_text)
+
+                len_src = len(source_text)
+                len_aug = len(aug_text)
+                len_ratio = len_aug / len_src if len_src > 0 else 0.0
+
+                if not is_length_ok(
+                    source_text=source_text,
+                    aug_text=aug_text,
+                    augmentation_type=augmentation_type,
+                    min_len_ratio=min_len_ratio,
+                    max_len_ratio=max_len_ratio,
+                ):
+                    print(
+                        f"[SKIP] длина aug/source = {len_ratio:.2f} "
+                        f"(ожидалось [{min_len_ratio}, {max_len_ratio}], "
+                        f"тип={augmentation_type}, len_src={len_src})"
+                    )
+                    orig_idx = (orig_idx + 1) % orig_count
+                    continue
+
+                if normalize_text(aug_text) == normalize_text(source_text):
+                    print("[SKIP] идентичен оригиналу")
+                    orig_idx = (orig_idx + 1) % orig_count
+                    continue
+
+                original_cosine_sim = cos_sim(embed_model, source_text, aug_text)
+                if not (sim_min <= original_cosine_sim <= sim_max):
+                    print(f"[SKIP] sim с source={original_cosine_sim:.4f}")
+                    orig_idx = (orig_idx + 1) % orig_count
+                    continue
+
+                new_emb = embed_model.encode(
+                    aug_text,
+                    convert_to_tensor=True,
+                    normalize_embeddings=True,
+                )
+                sims = util.cos_sim(new_emb, label_embs)[0]
+                max_label_sim = float(torch.max(sims))
+
+                if not (SIM_LABEL_MIN <= max_label_sim <= SIM_LABEL_MAX):
+                    print(f"[SKIP] sim с лейблом={max_label_sim:.4f}")
+                    orig_idx = (orig_idx + 1) % orig_count
+                    continue
+
+                label_embs = torch.cat([label_embs, new_emb.unsqueeze(0)], dim=0)
+                label_to_embs[label] = label_embs
+
+                aug_rows.append({
+                    "label": label,
+                    "text": aug_text,
+                    "source_text": source_text,
+                    "cosine_sim": original_cosine_sim,
+                    "max_label_cosine_sim": max_label_sim,
+                    "augmentation_type": augmentation_type,
+                })
+
+                added_for_label_this_round += 1
+                need -= 1
+
+                if total_to_add > 0:
+                    added_now = len(aug_rows) - initial_aug_len
+                    added_now_clamped = min(added_now, total_to_add)
+                    print(f"Добавлено {added_now_clamped}/{total_to_add} аугментаций")
+
+                if len(aug_rows) % 5 == 0:
+                    pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)
+                    print(f"Сохранено {len(aug_rows)} примеров")
+
+                orig_idx = (orig_idx + 1) % orig_count
+
+            if need > 0:
+                print(
+                    f"[ROUND STOP] label='{label}' не добит в этом раунде: "
+                    f"осталось {need}, попыток {attempts}/{max_attempts}, "
+                    f"добавлено за раунд {added_for_label_this_round}"
+                )
+            else:
+                print(f"[DONE] label='{label}' добит в этом раунде")
+
+        round_added_after = len(aug_rows)
+        added_this_round = round_added_after - round_added_before
+
+        print(f"\nРаунд {round_idx} завершён. Добавлено за раунд: {added_this_round}")
+
+        pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)
+        print(f"Промежуточно сохранено {len(aug_rows)} примеров")
+
+        if added_this_round == 0:
+            print(
+                "\nЗа текущий раунд не добавлено ни одного нового примера. "
+                "Останавливаемся, чтобы не крутить бесконечный цикл."
             )
-            sims = util.cos_sim(new_emb, label_embs)[0]
-            max_label_sim = float(torch.max(sims))
+            break
 
-            if not (SIM_LABEL_MIN <= max_label_sim <= SIM_LABEL_MAX):
-                print(f"[SKIP] sim с лейблом={max_label_sim:.4f}")
-                orig_idx = (orig_idx + 1) % orig_count
-                continue
-
-            label_embs = torch.cat([label_embs, new_emb.unsqueeze(0)], dim=0)
-            label_to_embs[label] = label_embs
-
-            aug_rows.append({
-                "label": label,
-                "text": aug_text,
-                "source_text": source_text,
-                "cosine_sim": original_cosine_sim,
-                "max_label_cosine_sim": max_label_sim,
-                "augmentation_type": augmentation_type,
-            })
-
-            # прогресс по общему числу добавленных аугментаций
-            if total_to_add > 0:
-                added_now = len(aug_rows) - initial_aug_len
-                # не выходим за пределы total_to_add
-                added_now_clamped = min(added_now, total_to_add)
-                print(f"Добавлено {added_now_clamped}/{total_to_add} аугментаций")
-
-            if len(aug_rows) % 5 == 0:
-                pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)
-                print(f"Сохранено {len(aug_rows)} примеров")
-
-            orig_idx = (orig_idx + 1) % orig_count
-            need -= 1
+    pending_after = []
+    for label in small_labels:
+        orig_count = len(label_to_texts[label])
+        label_aug_count = sum(1 for r in aug_rows if r["label"] == label)
+        current_count = orig_count + label_aug_count
+        if current_count < TARGET_PER_CLASS:
+            pending_after.append((label, current_count, TARGET_PER_CLASS - current_count))
 
     pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)
+
     print(f"\nИтого аугментированных примеров: {len(aug_rows)}")
+    if pending_after:
+        print("\nОстались недобитые лейблы:")
+        for label, current_count, need in pending_after:
+            print(f"- {label}: есть {current_count}, осталось добить {need}")
+    else:
+        print("Все малые лейблы успешно добиты до целевого количества")
+
     return pd.DataFrame(aug_rows)
+    

@@ -19,17 +19,6 @@ def mt_tokens_len(text: str, mode: str, device: torch.device) -> int:
     return inputs.input_ids.shape[1]
 
 
-def preprocess_before_translate(text: str) -> str:
-    """
-    Убираем «шумовые» конструкции, которые обычно ломают переводчик:
-    длинные цепочки дефисов/равно/подчёркиваний и многоточия.
-    """
-    text = re.sub(r"[-=_*]{5,}", "—", text)   # 5+ дефисов/равно/подчёркиваний → тире
-    text = re.sub(r"[.\s]{5,}", " ", text)    # 5+ точек/пробелов → пробел
-    text = re.sub(r"\s{2,}", " ", text)       # множественные пробелы → один
-    return text.strip()
-
-
 def generate_translate(
     text: str,
     mode: str,

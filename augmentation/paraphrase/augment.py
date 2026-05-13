@@ -6,6 +6,7 @@ from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
 from ..common.masks import mask_placeholders, unmask_placeholders
+from ..common.text_utils import preprocess_text
 from ..common.config import SIM_MIN, SIM_MAX
 
 
@@ -176,6 +177,7 @@ def paraphrase_document(
     device: torch.device,
 ) -> str:
     masked_text, mapping = mask_placeholders(source_text)
+    masked_text = preprocess_text(masked_text)
     sentences = [s.text for s in sentenize(masked_text)]
     paraphrased_sentences = []
 

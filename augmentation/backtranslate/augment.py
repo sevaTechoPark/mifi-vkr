@@ -3,10 +3,12 @@ from sentence_transformers import SentenceTransformer, util
 from razdel import sentenize
 from tqdm.auto import tqdm
 
-from .translate import safe_translate, clean_bt_result, preprocess_before_translate
+from .translate import safe_translate, clean_bt_result
 from ..common.masks import mask_placeholders, unmask_placeholders
+from ..common.text_utils import preprocess_text
 from ..common.perplexity import rugpt_perplexity_list
 from ..common.config import SIM_MIN, SIM_MAX
+
 
 LANG_PAIRS = [("ru-en", "en-ru"), ("ru-fr", "fr-ru"), ("ru-es", "es-ru")]
 
@@ -65,7 +67,7 @@ def back_translate_document(
     device: torch.device,
 ) -> str:
     masked_text, mapping = mask_placeholders(text_orig)
-    masked_text = preprocess_before_translate(masked_text)
+    masked_text = preprocess_text(masked_text)
     sentences = [s.text.strip() for s in sentenize(masked_text) if s.text.strip()]
 
     bt_sentences = []

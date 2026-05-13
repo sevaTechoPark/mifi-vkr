@@ -102,6 +102,13 @@ python -m cosine_similarity_classification.main \
 
 ## IV Классификация бертом
 
-```
+mkdir -p ~/papadyk-vkr/bert-classification-out
 
+При перезапусках лучше удалять эту директорию, чтобы кеши от прошлых данных не повлияли.
+
+```
+python -m bert_classification.main \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/bert-classification-out
 ```

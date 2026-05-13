@@ -6,6 +6,29 @@ from .config import ModelConfig, TrainConfig, DataConfig, PathConfig
 from .training import run_training_pipeline
 
 
+def _str2bool(v):
+    if isinstance(v, bool):
+        return v
+    v = str(v).strip().lower()
+    if v in {"true", "1", "yes", "y"}:
+        return True
+    if v in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {v}")
+
+
+def _field_arg_type(f):
+    if f.type is bool:
+        return _str2bool
+    if f.type in (int, float, str):
+        return f.type
+
+    default_type = type(f.default)
+    if default_type is bool:
+        return _str2bool
+    return default_type
+
+
 def _override_dataclass_from_args(instance, args, field_names):
     updates = {}
     for name in field_names:
@@ -42,20 +65,34 @@ def build_configs_from_args(args):
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate BERT text classification model"
+    )
 
-    parser.add_argument("--train-file", required=True)
-    parser.add_argument("--test-file", required=True)
+    parser.add_argument("--train-file", "--train", dest="train_file", required=True)
+    parser.add_argument("--test-file", "--test", dest="test_file", required=True)
     parser.add_argument("--output-dir", required=True)
 
     for f in fields(ModelConfig):
-        parser.add_argument(f"--{f.name.replace('_', '-')}", type=type(f.default), default=None)
+        parser.add_argument(
+            f"--{f.name.replace('_', '-')}",
+            type=_field_arg_type(f),
+            default=None,
+        )
 
     for f in fields(TrainConfig):
-        parser.add_argument(f"--{f.name.replace('_', '-')}", type=type(f.default), default=None)
+        parser.add_argument(
+            f"--{f.name.replace('_', '-')}",
+            type=_field_arg_type(f),
+            default=None,
+        )
 
     for f in fields(DataConfig):
-        parser.add_argument(f"--{f.name.replace('_', '-')}", type=type(f.default), default=None)
+        parser.add_argument(
+            f"--{f.name.replace('_', '-')}",
+            type=_field_arg_type(f),
+            default=None,
+        )
 
     return parser
 

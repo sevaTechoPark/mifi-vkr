@@ -20,6 +20,6 @@ SHORT_TEXT_THRESHOLD = 700
 
 # минимальное отношение длины paraphrase/source для коротких текстов
 PARAPHRASE_MIN_LEN_RATIO_SHORT = 0.40
-PARA_MIN_LEN_RATIO = 0.65
+PARA_MIN_LEN_RATIO = 0.5
 PARA_MAX_LEN_RATIO = 1.30
 

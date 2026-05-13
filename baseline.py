@@ -184,10 +184,13 @@ python -m hybrid.main classical \
 # fine-tune train_augmented_3
 # linear_svc: {'balanced_accuracy': 0.155629, 'macro_f1': 0.152774}
 # logreg: {'balanced_accuracy': 0.270957, 'macro_f1': 0.27713}
-# original train_augmented_3
+# original train_augmented_3 weight 5
 # linear_svc: {'balanced_accuracy': 0.288799, 'macro_f1': 0.302895}
 # logreg: {'balanced_accuracy': 0.300821, 'macro_f1': 0.300796
-         
+# original train_augmented_3 weight 50
+# linear_svc: {'balanced_accuracy': 0.221075, 'macro_f1': 0.217713}
+# logreg: {'balanced_accuracy': 0.343632, 'macro_f1': 0.356956}
+
 python -m hybrid.main mlp \
   --vecdir /Users/v.papadyk/ml/mifi-vkr/hybrid/data/hybrid_vec \
   --epochs 40 \

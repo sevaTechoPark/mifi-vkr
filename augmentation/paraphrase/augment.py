@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 from sentence_transformers import SentenceTransformer, util
 
 from .models import load_paraphrase_model
-from ..common.masks import mask_placeholders, unmask_placeholders
+from ..common.masks import mask_placeholders, unmask_placeholders, has_leftover_mask_tokens
 from ..common.config import SIM_MIN, SIM_MAX
 
 
@@ -185,12 +185,24 @@ def paraphrase_document(
         subs = split_long_sentence(s, tok, device, max_tokens=120)
         paraphrased_subs = []
 
-        for sub in tqdm(subs, total=len(subs),
-                        desc=f"Chunks {i}/{len(sentences)}", position=1, leave=False):
+        for sub in tqdm(
+            subs,
+            total=len(subs),
+            desc=f"Chunks {i}/{len(sentences)}",
+            position=1,
+            leave=False,
+        ):
             para_text, _ = generate_best_paraphrase(sub, tok, model, embed_model, device)
             paraphrased_subs.append(para_text)
 
         paraphrased_sentences.append(" ".join(paraphrased_subs))
 
     result_masked = " ".join(paraphrased_sentences)
-    return unmask_placeholders(result_masked, mapping)
+    para_text = unmask_placeholders(result_masked, mapping)
+
+    # safety-check: если остались <PH_...> — возвращаем исходный текст
+    if has_leftover_mask_tokens(para_text):
+        return source_text
+
+    return para_text
+    

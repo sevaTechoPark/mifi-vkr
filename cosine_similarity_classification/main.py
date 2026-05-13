@@ -3,6 +3,20 @@ from pathlib import Path
 
 import pandas as pd
 
+from cosine_similarity_classification.config import (
+    MODEL_DIR,
+    BASE_MODEL_NAME,
+    TEXT_COLUMN,
+    LABEL_COLUMN,
+    METHOD,
+    MAX_LENGTH,
+    CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    POOLING,
+    CHUNK_AGGREGATION,
+    BATCH_SIZE,
+    DEVICE,
+)
 from cosine_similarity_classification.embedder import (
     load_texts_and_labels,
     build_embedder,
@@ -23,21 +37,22 @@ def _test_has_label_column(test_file, label_col):
 def run_from_params(
     train_file,
     test_file,
-    model_dir,
-    base_model_name="ai-forever/ruRoberta-large",
-    text_col="text",
-    label_col="label",
-    method="centroid",
-    max_length=512,
-    chunk_size=448,
-    chunk_overlap=96,
-    pooling="mean_max",
-    chunk_aggregation="mean_max",
-    batch_size=8,
+    model_dir=MODEL_DIR,
+    base_model_name=BASE_MODEL_NAME,
+    text_col=TEXT_COLUMN,
+    label_col=LABEL_COLUMN,
+    method=METHOD,
+    max_length=MAX_LENGTH,
+    chunk_size=CHUNK_SIZE,
+    chunk_overlap=CHUNK_OVERLAP,
+    pooling=POOLING,
+    chunk_aggregation=CHUNK_AGGREGATION,
+    batch_size=BATCH_SIZE,
+    device=DEVICE,
 ):
-    train_file = str(train_file)
-    test_file = str(test_file)
-    model_dir = str(model_dir)
+    train_file = str(Path(train_file).expanduser())
+    test_file = str(Path(test_file).expanduser())
+    model_dir = str(Path(model_dir).expanduser()) if str(model_dir).strip() else ""
 
     test_has_labels = _test_has_label_column(test_file, label_col)
 
@@ -64,6 +79,7 @@ def run_from_params(
         pooling=pooling,
         chunk_aggregation=chunk_aggregation,
         batch_size=batch_size,
+        device=device,
     )
 
     train_embs = embed_dataframe(train_df, embedder, text_col=text_col)
@@ -102,6 +118,7 @@ def run_from_params(
         "pooling": pooling,
         "chunk_aggregation": chunk_aggregation,
         "batch_size": int(batch_size),
+        "device": device,
         **extra,
     }
 
@@ -140,23 +157,28 @@ def run_from_params(
 
 def build_argparser():
     parser = argparse.ArgumentParser(
-        description="Cosine similarity classification over embeddings from bert_embeddings/best_model"
+        description="Cosine similarity classification over embeddings"
     )
-    parser.add_argument("--train_file", type=str, required=True)
-    parser.add_argument("--test_file", type=str, required=True)
-    parser.add_argument("--model_dir", type=str, required=True)
+    parser.add_argument("--train", type=Path, required=True, help="Path to train CSV")
+    parser.add_argument("--test", type=Path, required=True, help="Path to test CSV")
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=Path(MODEL_DIR) if MODEL_DIR else Path(""),
+        help="Directory with local embedding model weights",
+    )
+    parser.add_argument("--device", type=str, default=DEVICE)
+    parser.add_argument("--base-model-name", type=str, default=BASE_MODEL_NAME)
+    parser.add_argument("--text-col", type=str, default=TEXT_COLUMN)
+    parser.add_argument("--label-col", type=str, default=LABEL_COLUMN)
+    parser.add_argument("--method", type=str, choices=["nearest", "centroid"], default=METHOD)
 
-    parser.add_argument("--base_model_name", type=str, default="ai-forever/ruRoberta-large")
-    parser.add_argument("--text_col", type=str, default="text")
-    parser.add_argument("--label_col", type=str, default="label")
-    parser.add_argument("--method", type=str, choices=["nearest", "centroid"], default="centroid")
-
-    parser.add_argument("--max_length", type=int, default=512)
-    parser.add_argument("--chunk_size", type=int, default=448)
-    parser.add_argument("--chunk_overlap", type=int, default=96)
-    parser.add_argument("--pooling", type=str, choices=["mean", "cls", "max", "mean_max"], default="mean_max")
-    parser.add_argument("--chunk_aggregation", type=str, choices=["mean", "max", "mean_max"], default="mean_max")
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--max-length", type=int, default=MAX_LENGTH)
+    parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
+    parser.add_argument("--chunk-overlap", type=int, default=CHUNK_OVERLAP)
+    parser.add_argument("--pooling", type=str, choices=["mean", "cls", "max", "mean_max"], default=POOLING)
+    parser.add_argument("--chunk-aggregation", type=str, choices=["mean", "max", "mean_max"], default=CHUNK_AGGREGATION)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
 
     return parser
 
@@ -166,8 +188,8 @@ def main():
     args = parser.parse_args()
 
     _, metrics = run_from_params(
-        train_file=args.train_file,
-        test_file=args.test_file,
+        train_file=args.train,
+        test_file=args.test,
         model_dir=args.model_dir,
         base_model_name=args.base_model_name,
         text_col=args.text_col,
@@ -179,6 +201,7 @@ def main():
         pooling=args.pooling,
         chunk_aggregation=args.chunk_aggregation,
         batch_size=args.batch_size,
+        device=args.device,
     )
 
     print()

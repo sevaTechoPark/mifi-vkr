@@ -1,5 +1,3 @@
-# data.py — загрузка, построение и сохранение датасетов
-
 import os
 import pandas as pd
 

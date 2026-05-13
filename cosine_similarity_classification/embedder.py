@@ -2,9 +2,27 @@ import numpy as np
 import pandas as pd
 
 from bert_embeddings.embedding_model import LongTextRobertaEmbedder
+from .config import (
+    BASE_MODEL_NAME,
+    TEXT_COLUMN,
+    LABEL_COLUMN,
+    MAX_LENGTH,
+    CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    POOLING,
+    CHUNK_AGGREGATION,
+    BATCH_SIZE,
+    DEVICE,
+    MODEL_DIR,
+)
 
 
-def load_texts_and_labels(path, text_col="text", label_col="label", require_labels=True):
+def load_texts_and_labels(
+    path,
+    text_col=TEXT_COLUMN,
+    label_col=LABEL_COLUMN,
+    require_labels=True,
+):
     df = pd.read_csv(path)
 
     required_cols = [text_col]
@@ -27,14 +45,15 @@ def load_texts_and_labels(path, text_col="text", label_col="label", require_labe
 
 
 def build_embedder(
-    model_dir="",
-    base_model_name="ai-forever/ruRoberta-large",
-    max_length=512,
-    chunk_size=448,
-    chunk_overlap=96,
-    pooling="mean_max",
-    chunk_aggregation="mean_max",
-    batch_size=8,
+    model_dir=MODEL_DIR,
+    base_model_name=BASE_MODEL_NAME,
+    max_length=MAX_LENGTH,
+    chunk_size=CHUNK_SIZE,
+    chunk_overlap=CHUNK_OVERLAP,
+    pooling=POOLING,
+    chunk_aggregation=CHUNK_AGGREGATION,
+    batch_size=BATCH_SIZE,
+    device=DEVICE,
 ):
     return LongTextRobertaEmbedder(
         model_dir=model_dir,
@@ -45,10 +64,11 @@ def build_embedder(
         pooling=pooling,
         chunk_aggregation=chunk_aggregation,
         batch_size=batch_size,
+        device=device,
     )
 
 
-def embed_dataframe(df, embedder, text_col="text"):
+def embed_dataframe(df, embedder, text_col=TEXT_COLUMN):
     texts = df[text_col].tolist()
     embs = embedder.encode(texts)
     return embs

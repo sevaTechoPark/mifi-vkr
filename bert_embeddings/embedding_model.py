@@ -26,7 +26,6 @@ class LongTextRobertaEmbedder:
         self,
         model_dir,
         cfg: EmbeddingConfig | None = None,
-        # Отдельные параметры для обратной совместимости и явного переопределения
         base_model_name: str | None = None,
         max_length: int | None = None,
         chunk_size: int | None = None,
@@ -42,22 +41,28 @@ class LongTextRobertaEmbedder:
         if cfg is None:
             cfg = EmbeddingConfig()
 
-        # Явные аргументы перекрывают cfg
-        self.base_model_name   = base_model_name   or cfg.base_model_name
-        self.max_length        = max_length        or cfg.max_length
-        self.pooling           = pooling           or cfg.pooling
+        self.base_model_name = base_model_name or cfg.base_model_name
+        self.max_length = max_length or cfg.max_length
+        self.pooling = pooling or cfg.pooling
         self.chunk_aggregation = chunk_aggregation or cfg.chunk_aggregation
-        self.batch_size        = batch_size        or cfg.batch_size
-        self.normalize_chunks  = normalize_chunks  if normalize_chunks  is not None else cfg.normalize_chunks
-        self.normalize_document= normalize_document if normalize_document is not None else cfg.normalize_document
-        self.add_global_chunk  = add_global_chunk  if add_global_chunk  is not None else cfg.add_global_chunk
+        self.batch_size = batch_size or cfg.batch_size
+        self.normalize_chunks = (
+            normalize_chunks if normalize_chunks is not None else cfg.normalize_chunks
+        )
+        self.normalize_document = (
+            normalize_document if normalize_document is not None else cfg.normalize_document
+        )
+        self.add_global_chunk = (
+            add_global_chunk if add_global_chunk is not None else cfg.add_global_chunk
+        )
 
-        raw_chunk_size    = chunk_size    or cfg.chunk_size
+        raw_chunk_size = chunk_size or cfg.chunk_size
         raw_chunk_overlap = chunk_overlap or cfg.chunk_overlap
-        self.chunk_size    = min(raw_chunk_size, self.max_length - 2)
+        self.chunk_size = min(raw_chunk_size, self.max_length - 2)
         self.chunk_overlap = min(raw_chunk_overlap, max(0, self.chunk_size // 2))
 
-        self.model_dir = Path(model_dir)
+        model_dir_str = str(model_dir).strip() if model_dir is not None else ""
+        self.model_dir = Path(model_dir_str).expanduser() if model_dir_str else None
 
         if device is None:
             if torch.cuda.is_available():
@@ -72,8 +77,11 @@ class LongTextRobertaEmbedder:
         roberta_cfg = RobertaConfig.from_pretrained(self.base_model_name)
         self.model = RobertaModel.from_pretrained(self.base_model_name, config=roberta_cfg)
 
-        weights_path = self.model_dir / "pytorch_model.bin"
-        if weights_path.exists():
+        if self.model_dir is not None:
+            weights_path = self.model_dir / "pytorch_model.bin"
+            if not weights_path.exists():
+                raise FileNotFoundError(f"Weights not found: {weights_path}")
+
             state_dict = torch.load(weights_path, map_location="cpu")
             filtered = {
                 k.replace("roberta.", "", 1): v
@@ -81,17 +89,22 @@ class LongTextRobertaEmbedder:
                 if k.startswith("roberta.")
             }
             missing, unexpected = self.model.load_state_dict(filtered, strict=False)
-            print("Loaded encoder weights.")
+            print(f"Loaded encoder weights from: {weights_path}")
             print(f"Missing keys: {len(missing)}")
             print(f"Unexpected keys: {len(unexpected)}")
         else:
-            raise FileNotFoundError(f"Weights not found: {weights_path}")
+            print(f"Using base model without local fine-tuned weights: {self.base_model_name}")
 
         self.model.to(self.device)
         self.model.eval()
 
     def _tokenize_full(self, text):
-        encoded = self.tokenizer(text, add_special_tokens=False, truncation=False, return_attention_mask=False)
+        encoded = self.tokenizer(
+            text,
+            add_special_tokens=False,
+            truncation=False,
+            return_attention_mask=False,
+        )
         return encoded["input_ids"]
 
     def _chunk_token_ids(self, text):
@@ -106,7 +119,11 @@ class LongTextRobertaEmbedder:
             piece = token_ids[start:end]
             if not piece:
                 continue
-            piece = [self.tokenizer.cls_token_id] + piece[: self.max_length - 2] + [self.tokenizer.sep_token_id]
+            piece = (
+                [self.tokenizer.cls_token_id]
+                + piece[: self.max_length - 2]
+                + [self.tokenizer.sep_token_id]
+            )
             chunks.append(piece)
             if end >= len(token_ids):
                 break

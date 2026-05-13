@@ -7,9 +7,8 @@ from utils.clean_original_df import make_df_clean
 from utils.split_original_df import split_original_df
 
 
-def read_original_df(data_dir: str | Path, filename: str = "original_data.json") -> pd.DataFrame:
-    data_dir = Path(data_dir)
-    path = data_dir / filename
+def read_original_df(original_dataset: str | Path) -> pd.DataFrame:
+    path = Path(original_dataset)
     if not path.exists():
         raise FileNotFoundError(f"Input file not found: {path}")
     return pd.read_json(path)
@@ -18,19 +17,26 @@ def read_original_df(data_dir: str | Path, filename: str = "original_data.json")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--original-dataset",
+        type=Path,
+        required=True,
+        help="Path to original_data.json",
+    )
+    parser.add_argument(
         "--data-dir",
         type=Path,
         required=True,
-        help="Directory with original_data.json and output CSV files",
+        help="Directory where cleaned_df.csv, train.csv and test.csv will be saved",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    original_dataset = args.original_dataset
     data_dir = args.data_dir
 
-    df = read_original_df(data_dir)
+    df = read_original_df(original_dataset)
     cleaned_df = make_df_clean(
         df=df,
         output_dir=data_dir,
@@ -47,5 +53,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
- # python main.py --data-dir=/Users/v.papadyk/ml/mifi-vkr/data   

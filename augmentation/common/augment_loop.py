@@ -85,6 +85,10 @@ def run_augmentation_loop(
     else:
         print("Генерируем с нуля")
 
+    # сколько нужно добавить поверх уже существующих аугментаций
+    initial_aug_len = len(aug_rows)
+    total_to_add = max(0, TOTAL_AUGMENTED - initial_aug_len)
+
     label_to_texts = {
         label: df_small.loc[df_small["label"] == label, "text"].tolist()
         for label in small_labels
@@ -123,7 +127,7 @@ def run_augmentation_loop(
 
             aug_text = augment_fn(source_text)
 
-                        # фильтр по длине (адаптивный для коротких текстов / paraphrase)
+            # фильтр по длине (адаптивный для коротких текстов / paraphrase)
             len_src = len(source_text)
             len_aug = len(aug_text)
             len_ratio = len_aug / len_src if len_src > 0 else 0.0
@@ -176,6 +180,13 @@ def run_augmentation_loop(
                 "max_label_cosine_sim": max_label_sim,
                 "augmentation_type": augmentation_type,
             })
+
+            # прогресс по общему числу добавленных аугментаций
+            if total_to_add > 0:
+                added_now = len(aug_rows) - initial_aug_len
+                # не выходим за пределы total_to_add
+                added_now_clamped = min(added_now, total_to_add)
+                print(f"Добавлено {added_now_clamped}/{total_to_add} аугментаций")
 
             if len(aug_rows) % 5 == 0:
                 pd.DataFrame(aug_rows).to_csv(aug_file_path, index=False)

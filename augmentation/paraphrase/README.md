@@ -1,164 +1,230 @@
 # paraphrase
 
-Модуль аугментации текстовых данных методом **перефразирования** (paraphrasing) на основе seq2seq-модели `ruT5-large-paraphraser`.
+Модуль аугментации текстовых данных методом **перефразирования** (paraphrasing) на основе seq2seq‑модели `fyaronskiy/ruT5-large-paraphraser`.[web:50]
 
-Идея: для каждого предложения генерируется несколько вариантов перефраза с разными параметрами семплирования, после чего отбирается лучший кандидат по косинусному сходству с оригиналом.
+Идея: для каждого предложения генерируется несколько вариантов перефраза (через безопасный вызов модели c разными режимами генерации), после чего отбирается лучший кандидат по косинусному сходству с оригиналом и соотношению длин.
 
-***
+---
 
 ## Структура
 
-```
+```text
 paraphrase/
 ├── __init__.py
-├── models.py      # Загрузка и кэширование ruT5-large-paraphraser
-├── augment.py     # Генерация перефраза, отбор кандидатов, основная функция paraphrase_document
-└── main.py        # CLI: единичный пример и цикл по датасету
+├── models.py   # Загрузка и кэширование ruT5-large-paraphraser
+├── phrase.py   # split_long_sentence, generate_phrase, safe_paraphrase, postprocess_paraphrase_text
+├── augment.py  # generate_para_candidates, choose_best_paraphrase, paraphrase_document
+├── main.py     # run_from_params + CLI: единичный пример и цикл по датасету
+└── README.md
 ```
 
-***
+---
 
 ## Как это работает
 
 ### 1. Защита плейсхолдеров (`common/masks.py`)
 
-**Ключевое отличие от наивного применения модели.** Перед перефразированием все теги `[ORGANIZATION]`, `[PERSON]`, `[DATE_TIME]` и т.д. заменяются на специальные токены `MaskTok0X`, `MaskTok1X`, ... Это предотвращает «творческую интерпретацию» плейсхолдеров моделью (например, `[ORGANIZATION]` → `"Органик и АТИОН"`).
+Перед перефразированием все теги `[ORGANIZATION]`, `[PERSON]`, `[DATE_TIME]` и т.п. заменяются на `<PH_0>`, `<PH_1>`, ... Это предотвращает «творческую интерпретацию» плейсхолдеров моделью (например, `[ORGANIZATION]` → `"Органик и АТИОН"`).
 
+```text
+[PERSON] просит согласовать → <PH_0> просит согласовать
+              ↓ per Т5 ↓
+<PH_0> запрашивает согласование → [PERSON] запрашивает согласование
 ```
-[PERSON] просит согласовать → MaskTok0X просит согласовать
-              ↓ перефраз ↓
-MaskTok0X запрашивает согласование → [PERSON] запрашивает согласование
+
+После генерации:
+
+1. `<PH_i>` восстанавливаются обратно в исходные плейсхолдеры.
+2. Все артефакты вида `PH_7`, `PH.24`, `PCH.`, `PS_33` удаляются.
+
+### 2. Предобработка и фильтр формальных текстов (`common/text_utils.py`)
+
+Перед вызовом модели:
+
+1. `preprocess_text`:
+
+   - нормализует цепочки `-=_*`,
+   - убирает «лапшу» из точек и пробелов,
+   - схлопывает пробелы.
+
+2. `is_highly_formal`:
+
+   - оценивает долю цифр и заглавных букв,
+   - ищет маркеры реквизитов (`ОГРН`, `ИНН`, `КПП`, `БИК`, `р/с`, ...),
+   - если текст слишком «реквизитный», перефраз **пропускается полностью**, возвращается исходный текст без изменений.
+
+Это позволяет не мучить ruT5 на длинных юридических письмах с плотной «шапкой» реквизитов (где модель часто ведёт себя как неконтролируемый суммаризатор).
+
+### 3. Безопасное разбиение по длине (`phrase.py → split_long_sentence`, `safe_paraphrase`)
+
+`ruT5-large-paraphraser` имеет ограничение по длине входа (в коде — 300 токенов). Для надёжной работы:
+
+- `split_long_sentence(sent, tok, device, max_tokens=120)`:
+  - если предложение ≤ 120 токенов — возвращает как есть;
+  - иначе:
+    - пробует разбить по знакам препинания (`,`, `;`, `:`, `—`, `-`),
+    - если не помогает — режет по словам, аккумулируя чанки,
+    - если часть всё ещё > 120 — рекурсивно делит её аналогично.
+
+- `generate_phrase(text, tok, model, device, **gen_kwargs)`:
+  - принимает уже подготовленный кусок (после `split_long_sentence`),
+  - проверяет, что длина ≤ 300 токенов (иначе кидает ошибку),
+  - запускает `model.generate` с консервативными параметрами (beam-search, без sampling).
+
+- `safe_paraphrase(text, tok, model, max_tokens, device, **gen_kwargs)`:
+  - вызывает `split_long_sentence`,
+  - для каждого чанка:
+    - если длина ≤ 300 токенов — использует `generate_phrase`,
+    - если > 300 — режет по словам фиксированным окном (по 20 слов) и применяет `generate_phrase` к каждому,
+  - склеивает куски обратно.
+
+### 4. Генерация кандидатов (`augment.py → generate_para_candidates`)
+
+```python
+GEN_MODES = [
+    {"do_sample": False, "num_beams": 5},  # базовый консервативный beam-search
+    {"do_sample": False, "num_beams": 8},  # чуть более "жирный" beam-search
+    {"do_sample": True,  "num_beams": 1, "top_p": 0.90, "temperature": 1.0},  # мягкий sampling
+]
 ```
 
-После генерации токены восстанавливаются в порядке убывания длины ключа (защита от конфликта `MaskTok1X` / `MaskTok10X`).
+Функция:
 
-### 2. Сегментация длинных предложений (`augment.py → split_long_sentence`)
+```python
+def generate_para_candidates(text: str, tok, model, device: torch.device) -> list[str]:
+    candidates = []
+    for cfg in GEN_MODES:
+        para = safe_paraphrase(
+            text=text,
+            tok=tok,
+            model=model,
+            max_tokens=120,
+            device=device,
+            **cfg,
+        )
+        para = para.strip()
+        if para:
+            candidates.append(para)
+    return list(dict.fromkeys(candidates))  # дедуп
+```
 
-`ruT5-large-paraphraser` принимает до **400 токенов**, но для надёжной генерации используется порог `max_tokens=120`. Алгоритм:
+Таким образом на одно предложение генерируется несколько кандидатов:
 
-1. Если предложение ≤ `max_tokens` — возвращаем как есть.
-2. Пробуем разбить по знакам препинания (`,`, `;`, `:`, `—`, `-`).
-3. Если знаков нет — режем по словам, накапливая чанки.
-4. Если одна часть после разбиения всё ещё длинная — режем её по словам.
+- 2 через beam-search без сэмплинга (стабильные),
+- 1 через мягкий sampling (для небольшого разнообразия).[web:50]
 
-### 3. Адаптивная генерация кандидатов (`augment.py → generate_best_paraphrase`)
+### 5. Отбор лучшего кандидата (`augment.py → choose_best_paraphrase`)
 
-Параметры генерации зависят от длины входа:
+```python
+def choose_best_paraphrase(
+    source_chunk: str,
+    candidates: list[str],
+    embed_model: SentenceTransformer,
+) -> str:
+    ...
+```
 
-| Режим | Условие | `n_samples` | `max_retries` | `temperature` |
-|-------|---------|-------------|---------------|---------------|
-| Короткий текст | `src_len < 70` токенов | 7 | 5 | 0.95 |
-| Стандартный | `src_len ≥ 70` токенов | 3 | 3 | 1.1 |
+Алгоритм:
 
-При каждом retry температура повышается (`+0.05` для коротких, `+0.1` для стандартных), что вынуждает модель генерировать более разнообразные варианты.
+1. Если `candidates` пуст — возвращается исходный `source_chunk`.
+2. Фильтр по длине:
 
-Для коротких текстов дополнительно задаются `top_k=30`, `top_p=0.85`, `repetition_penalty=1.1` — это уменьшает вероятность дегенерации (повторения слов) при малом числе входных токенов.
+   - считаем `len_ratio = len(candidate) / len(source_chunk)`,
+   - оставляем только те, для которых `[PARA_MIN_LEN_RATIO, PARA_MAX_LEN_RATIO]` = `[0.70, 1.30]`,
+   - если после фильтра список пуст — используем всех кандидатов.
 
-### 4. Отбор лучшего кандидата
+3. Считаем эмбеддинги `[source_chunk] + filtered_candidates` через `deepvk/USER2-base`.
+4. Считаем cosine similarity.
+5. Ищем кандидата в окне `[PARA_SIM_MIN, PARA_SIM_MAX]` = `[0.85, 0.97]`:
 
-1. Считаются косинусные сходства всех кандидатов с источником через `deepvk/USER2-base`.
-2. Фильтрация по окну `[SIM_MIN, SIM_MAX]` = `[0.80, 0.95]`.
-3. Из прошедших выбирается кандидат с **максимальным cosine** (в отличие от BT, перплексия здесь не считается — кандидатов меньше, и дополнительный inference rugpt избыточен).
-4. **Глобальный fallback:** на каждом retry обновляется лучший кандидат по cosine среди всех попыток — если ни одна итерация не дала кандидата в окне, возвращается глобально лучший (не только последней итерации).
+   - если окно не пустое — берём кандидата с максимальным cosine внутри окна,
+   - если пустое — fallback на кандидата с максимальным cosine по всем.
 
-### 5. Сборка документа (`augment.py → paraphrase_document`)
+6. Выбранный текст пропускается через `postprocess_paraphrase_text`:
 
-1. Маскировка плейсхолдеров.
-2. Разбивка на предложения через `razdel.sentenize`.
-3. Каждое предложение → `split_long_sentence` → для каждого чанка `generate_best_paraphrase`.
-4. Сборка чанков → предложений → документа.
-5. Восстановление плейсхолдеров.
+   - внутри — `clean_aug_result` (нормализация пунктуации и пробелов),
+   - затем `clean_generated_text` (удаление URL, PH‑мусора и т.п.).
 
-***
+Функция возвращает **строку** — лучший перефраз для данного предложения.
 
-## Зависимости моделей
+### 6. Сборка документа (`augment.py → paraphrase_document`)
 
-| Модель | Назначение | HuggingFace Hub |
-|--------|-----------|-----------------|
-| `ruT5-large-paraphraser` | Генерация перефраза | `fyaronskiy/ruT5-large-paraphraser` |
-| `USER2-base` | Эмбеддинги для отбора кандидата | `deepvk/USER2-base` |
+```python
+def paraphrase_document(
+    source_text: str,
+    tok,
+    model,
+    embed_model: SentenceTransformer,
+    device: torch.device,
+) -> str:
+    if is_highly_formal(source_text):
+        print("текст слишком формальный пропускаем перефраз")
+        return source_text
 
-Модель `ruT5-large-paraphraser` кэшируется через module-level переменные `_tok` / `_model` в `models.py`.
+    masked_text, mapping = mask_placeholders(source_text)
+    masked_text = preprocess_text(masked_text)
+    sentences = [s.text for s in sentenize(masked_text)]
+    paraphrased_sentences = []
 
-***
+    for s in tqdm(sentences, desc="Sentences"):
+        s = s.strip()
+        if not s:
+            continue
 
-## Сравнение с обратным переводом
+        candidates = generate_para_candidates(s, tok, model, device)
+        best_text = choose_best_paraphrase(
+            source_chunk=s,
+            candidates=candidates,
+            embed_model=embed_model,
+        )
+        paraphrased_sentences.append(best_text)
 
-| Критерий | Перефраз | Обратный перевод |
-|----------|---------|-----------------|
-| Число кандидатов на предложение | 3–7 (один проход) | 9 (3 языка × 3 режима) |
-| Промежуточный язык | Нет | Английский / французский / испанский |
-| Отбор по перплексии | Нет | Да (`rugpt3small`) |
-| Скорость генерации | Быстрее | Медленнее (6 моделей) |
-| Разнообразие | Ниже | Выше |
-| Риск потери домена | Средний | Выше (при двойном переводе) |
+    result_masked = " ".join(paraphrased_sentences)
+    para_text = unmask_placeholders(result_masked, mapping)
+    para_text = postprocess_paraphrase_text(para_text)
+    return para_text
+```
 
-***
+---
 
 ## Параметры качества (`common/config.py`)
 
-| Параметр | Значение | Смысл |
-|----------|---------|-------|
-| `SIM_MIN` | 0.80 | Минимальное сходство с источником |
-| `SIM_MAX` | 0.95 | Максимальное сходство (не идентично) |
-| `SIM_LABEL_MIN` | 0.80 | Минимальное сходство с текстами класса |
-| `SIM_LABEL_MAX` | 0.98 | Максимальное сходство с классом (не дубликат) |
-| `TARGET_PER_CLASS` | 40 | Целевое число примеров на класс |
+```python
+PARA_SIM_MIN       = 0.85
+PARA_SIM_MAX       = 0.97
+PARA_MIN_LEN_RATIO = 0.70
+PARA_MAX_LEN_RATIO = 1.30
+```
 
-***
+Дополнительно:
+
+- глобальные `SIM_LABEL_MIN` / `SIM_LABEL_MAX` контролируют сходство аугментов с классом,
+- `TARGET_PER_CLASS = 5` — целевой размер каждого «малого» класса.
+
+---
 
 ## Запуск
 
-### Установка зависимостей
+### Единичный пример из CLI
 
 ```bash
-pip install transformers sentencepiece sentence-transformers razdel tqdm torch
-```
-
-### Единичный пример
-
-```bash
-python -m paraphrase.main \
+python -m augmentation.paraphrase.main \
     --train data/train.csv \
     --output-dir out/ \
-    --single "Уважаемый [PERSON]! Просим согласовать проезд техники через [OBJECT]."
-```
-
-Вывод:
-```
-=== Paraphrased ===
-Уважаемый [PERSON]! Просьба дать согласие на движение транспортных средств через [OBJECT].
+    --single "В соответствии с договором просим согласовать въезд автотранспорта на территорию объекта."
 ```
 
 ### Цикл по датасету
 
 ```bash
-python -m paraphrase.main \
+python -m augmentation.paraphrase.main \
     --train data/train.csv \
     --output-dir out/
 ```
 
-Генерирует:
-- `out/train_paraphrase_partial.csv` — промежуточные результаты (сохраняется каждые 10 примеров)
-- `out/train_paraphrase.csv` — итоговый датасет (оригинал + аугментация)
+Результаты:
 
-### Формат входного CSV
+- `out/train_paraphrase_partial.csv` — лог аугментов (можно продолжать после прерывания),
+- `out/train_paraphrase.csv` — итоговый датасет (оригинал + перефразы).
 
-```
-label,text
-invoice,"[ORGANIZATION] просит оплатить счёт [FINANCIAL_DATA] до [DATE_TIME]."
-access_request,"Прошу оформить пропуск для [PERSON] на объект [OBJECT]."
-```
-
-### Формат выходного CSV (partial)
-
-```
-label,text,source_text,cosine_sim,max_label_cosine_sim,augmentation_type
-invoice,"[ORGANIZATION] запрашивает оплату...","[ORGANIZATION] просит оплатить...",0.861,0.884,paraphrase
-```
-
-***
-
-## Возобновление после прерывания
-
-Повторный запуск с теми же аргументами автоматически загружает `train_paraphrase_partial.csv` и продолжает с того места, где остановился. Уже заполненные классы пропускаются.
+Формат входного/выходного CSV такой же, как в backtranslate: поля `label,text` на входе и `label,text,source_text,cosine_sim,max_label_cosine_sim,augmentation_type` в partial‑выходе.

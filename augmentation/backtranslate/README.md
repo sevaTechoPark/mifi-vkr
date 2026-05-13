@@ -4,164 +4,195 @@
 
 Идея: перевести исходный русский текст на промежуточный язык (английский, французский или испанский), а затем обратно на русский. Разные языки-посредники и режимы генерации дают разные перефразировки, сохраняя при этом смысл исходного текста.
 
-***
+---
 
 ## Структура
 
-```
+```text
 backtranslate/
 ├── __init__.py
-├── models.py      # Загрузка и кэширование моделей MarianMT
-├── translate.py   # Низкоуровневые функции перевода и сегментации
-├── augment.py     # Генерация и отбор BT-кандидатов, основная функция back_translate_document
-└── main.py        # CLI: единичный пример и цикл по датасету
+├── models.py      # Загрузка и кэширование моделей MarianMT (ru-en, en-ru, ru-fr, ...).
+├── translate.py   # Низкоуровневые функции перевода и сегментации (mt_tokens_len, split_long_sentence, generate_translate, safe_translate).
+├── augment.py     # Генерация и отбор BT-кандидатов, основная функция back_translate_document.
+├── main.py        # run_from_params + CLI: единичный пример и цикл по датасету.
+└── README.md
 ```
 
-***
+---
 
 ## Как это работает
 
 ### 1. Защита плейсхолдеров (`common/masks.py`)
 
-Перед переводом все теги вида `[ORGANIZATION]`, `[DATE_TIME]`, `[PERSON]` и т.д. заменяются на специальные токены `MaskTok0X`, `MaskTok1X`, ... — CamelCase-слова без пробелов, которые переводчик пропускает как незнакомые слова (OOV). После перевода токены восстанавливаются в обратном порядке по убыванию длины ключа (защита от конфликта `MaskTok1X` / `MaskTok10X`).
+Перед переводом все теги вида `[ORGANIZATION]`, `[DATE_TIME]`, `[PERSON]` и т.п. заменяются на специальные токены `<PH_0>`, `<PH_1>`, ...:
 
-```
-[ORGANIZATION] не согласовывает проезд → MaskTok0X не согласовывает проезд
-                         ↓ перевод ↓
-MaskTok0X does not approve the passage → MaskTok0X не согласовывает проезд
-                         ↓ unmask ↓
+```text
+[ORGANIZATION] не согласовывает проезд → <PH_0> не согласовывает проезд
+                          ↓ перевод ↓
+<PH_0> does not approve the passage → <PH_0> не согласовывает проезд
+                          ↓ unmask ↓
 [ORGANIZATION] не согласовывает проезд
 ```
 
-### 2. Предобработка (`translate.py → preprocess_before_translate`)
+После генерации:
 
-Убираются «шумовые» символы, мешающие переводчику:
-- цепочки из 5+ дефисов/знаков равенства → `—`
-- цепочки из 5+ точек с пробелами → пробел
-- множественные пробелы → одинарный пробел
+1. Все известные `<PH_i>` восстанавливаются в исходные плейсхолдеры.
+2. Любые артефакты вида `PH_12`, `http://PH_4`, `< PH-3 >` удаляются как мусор.
+
+### 2. Предобработка (`common/text_utils.py → preprocess_text`)
+
+Сначала текст нормализуется:
+
+- длинные цепочки из `-=_*` (5+ символов) → `—`,
+- цепочки точек/пробелов (5+) → пробел,
+- множественные пробелы → один пробел.
+
+Это уменьшает количество мусора для переводчика и сегментатора.
 
 ### 3. Сегментация длинных предложений (`translate.py → split_long_sentence`)
 
-MarianMT имеет жёсткий лимит входа — **300 токенов**. Для безопасности используется порог `max_tokens=120` при переводе на промежуточный язык. Алгоритм рекурсивный:
+MarianMT ограничен по длине входа (мы считаем безопасным лимитом 300 токенов). Для перевода используется:
 
-1. Если предложение ≤ `max_tokens` — возвращаем как есть.
-2. Пробуем разбить по знакам препинания (`,`, `;`, `:`, `—`, `-`).
-3. Если знаков нет — режем по словам, накапливая чанки.
-4. Каждая часть проверяется рекурсивно.
+- `max_tokens=120` при первом разбиении (чтобы оставить запас),
+- рекурсивное деление:
 
-### 4. Генерация кандидатов (`augment.py → generate_bt_candidates`)
+  1. Если предложение ≤ `max_tokens` — возвращаем как есть.
+  2. Пытаемся разбить по знакам препинания (`,`, `;`, `:`, `—`, `-`).
+  3. Если разделителей нет — режем по словам, накапливая чанки.
+  4. Если часть всё ещё > `max_tokens` — рекурсивно делим её дальше.
 
-Для каждого предложения генерируются **9 кандидатов** (3 языковые пары × 3 режима генерации):
+### 4. Низкоуровневый перевод (`translate.py → generate_translate`, `safe_translate`)
 
-| Режим | `do_sample` | `num_beams` | `top_p` | `temperature` |
-|-------|-------------|-------------|---------|---------------|
-| Beam search | False | 5 | — | — |
-| Sampling мягкий | True | 1 | 0.90 | 1.0 |
-| Sampling агрессивный | True | 1 | 0.95 | 1.2 |
+- `generate_translate(text, mode, device, **gen_kwargs)`:
+  - берёт уже подготовленный кусок текста,
+  - проверяет, что длина ≤ 300 токенов (иначе кидает ошибку),
+  - запускает `MarianMTModel.generate` с дефолтными параметрами (`num_beams=1`, `do_sample=True`, `top_k=50`, `top_p=0.92`, `temperature=1.1`).
 
-Языковые пары: `ru→en→ru`, `ru→fr→ru`, `ru→es→ru`.
+- `safe_translate(text, mode, max_tokens, device, **gen_kwargs)`:
+  - режет текст через `split_long_sentence`,
+  - для каждого чанка:
+    - если длина ≤ 300 токенов — переводит `generate_translate`,
+    - если > 300 — максимально грубо режет по словам фиксированным окном (по 20 слов) и переводит отдельно,
+  - склеивает переводы обратно в строку.
 
-> **Важно:** `num_beams > 1` несовместим с `do_sample=True` в HuggingFace — при сэмплировании явно задаётся `num_beams=1`.
+### 5. Генерация кандидатов (`augment.py → generate_bt_candidates`)
 
-### 5. Отбор лучшего кандидата (`augment.py → choose_best_bt`)
+Для каждого предложения исходного текста:
 
-Для каждого предложения:
+1. Для каждой языковой пары:
 
-1. Считаются косинусные сходства кандидатов с источником через эмбеддинги `deepvk/USER2-base`.
-2. Фильтрация по окну `[SIM_MIN, SIM_MAX]` = `[0.80, 0.95]` — достаточно похож, но не идентичен.
-3. Для прошедших фильтр считается **перплексия** через `sberbank-ai/rugpt3small_based_on_gpt2`.
-4. Выбирается кандидат с **минимальной перплексией** (наиболее «естественный» русский текст); при равенстве — с максимальным cosine.
-5. Если никто не попал в окно — fallback на кандидата с максимальным cosine.
+   - `("ru-en", "en-ru")`,
+   - `("ru-fr", "fr-ru")`,
+   - `("ru-es", "es-ru")`,
 
-### 6. Сборка документа (`augment.py → back_translate_document`)
+2. Для каждой конфигурации генерации:
 
-1. Маскировка плейсхолдеров.
-2. Предобработка.
-3. Разбивка на предложения через `razdel.sentenize`.
-4. Для каждого предложения: генерация кандидатов → отбор лучшего.
-5. Сборка предложений обратно в документ.
-6. Восстановление плейсхолдеров.
+   | Режим             | `do_sample` | `num_beams` | `top_p` | `temperature` |
+   |-------------------|------------|-------------|---------|---------------|
+   | Beam search       | False      | 5           | —       | —             |
+   | Sampling мягкий   | True       | 1           | 0.90    | 1.0           |
+   | Sampling агрессивный | True    | 1           | 0.95    | 1.2           |
 
-***
+3. Вызов:
 
-## Зависимости моделей
+   ```python
+   mid = safe_translate(text, mode=src_lang, max_tokens=120, device=device, **cfg)
+   bt  = safe_translate(mid,  mode=tgt_lang, max_tokens=300, device=device, **cfg)
+   ```
 
-| Модель | Назначение | HuggingFace Hub |
-|--------|-----------|-----------------|
-| `opus-mt-ru-en` / `en-ru` | Перевод ru↔en | `Helsinki-NLP/opus-mt-ru-en` |
-| `opus-mt-ru-fr` / `fr-ru` | Перевод ru↔fr | `Helsinki-NLP/opus-mt-ru-fr` |
-| `opus-mt-ru-es` / `es-ru` | Перевод ru↔es | `Helsinki-NLP/opus-mt-ru-es` |
-| `USER2-base` | Эмбеддинги для отбора | `deepvk/USER2-base` |
-| `rugpt3small` | Перплексия для отбора | `sberbank-ai/rugpt3small_based_on_gpt2` |
+4. Результат прогоняется через `clean_aug_result` (лёгкая нормализация пунктуации и пробелов).
 
-Все модели кэшируются в памяти через словарь `_cache` в `models.py` — повторная загрузка не происходит.
+Итого на предложение до 9 сырых BT-кандидатов, после дедупликации — меньше.
 
-***
+### 6. Отбор лучшего кандидата (`augment.py → choose_best_bt`)
+
+```python
+def choose_best_bt(
+    source_chunk: str,
+    candidates: list[str],
+    embed_model: SentenceTransformer,
+    rugpt_tok,
+    rugpt_model,
+    rugpt_device: torch.device,
+) -> str:
+    ...
+```
+
+Алгоритм:
+
+1. Если кандидатов нет — возвращаем исходный `source_chunk`.
+2. Считаем эмбеддинги для `[source_chunk] + candidates` через `deepvk/USER2-base`.
+3. Считаем cosine similarity и фильтруем по окну `[BT_SIM_MIN, BT_SIM_MAX]` = `[0.80, 0.95]`.
+4. Для прошедших фильтр считаем перплексию `rugpt_perplexity_list` на `rugpt3small`.
+5. Выбираем кандидат с минимальной перплексией; при равенстве — с максимальным cosine.
+6. Если никто не попал в окно по cosine — берём кандидат с максимальным cosine.
+
+Функция возвращает **строку** — лучший BT‑вариант.
+
+### 7. Сборка документа (`augment.py → back_translate_document`)
+
+```python
+def back_translate_document(
+    text_orig: str,
+    embed_model: SentenceTransformer,
+    rugpt_tok,
+    rugpt_model,
+    device: torch.device,
+) -> str:
+    masked_text, mapping = mask_placeholders(text_orig)
+    masked_text = preprocess_text(masked_text)
+    sentences = [s.text.strip() for s in sentenize(masked_text) if s.text.strip()]
+
+    bt_sentences = []
+    for s in tqdm(sentences, desc="Sentences"):
+        candidates = generate_bt_candidates(s, device)
+        best_text = choose_best_bt(s, candidates, embed_model, rugpt_tok, rugpt_model, device)
+        bt_sentences.append(best_text)
+
+    result_masked = " ".join(bt_sentences)
+    bt_text = unmask_placeholders(result_masked, mapping)
+    bt_text = clean_generated_text(bt_text)
+    return bt_text
+```
+
+---
 
 ## Параметры качества (`common/config.py`)
 
-| Параметр | Значение | Смысл |
-|----------|---------|-------|
-| `SIM_MIN` | 0.80 | Минимальное сходство с источником (не слишком далеко) |
-| `SIM_MAX` | 0.95 | Максимальное сходство с источником (не идентично) |
-| `SIM_LABEL_MIN` | 0.80 | Минимальное сходство с текстами класса (релевантен классу) |
-| `SIM_LABEL_MAX` | 0.98 | Максимальное сходство с текстами класса (не дубликат) |
-| `TARGET_PER_CLASS` | 40 | Целевое число примеров на класс |
+```python
+BT_SIM_MIN       = 0.80
+BT_SIM_MAX       = 0.95
+BT_MIN_LEN_RATIO = 0.50
+BT_MAX_LEN_RATIO = 1.50
+```
 
-***
+Кроме того, общий цикл проверяет:
+
+- `SIM_LABEL_MIN`, `SIM_LABEL_MAX` — сходство аугментов с базой класса,
+- `TARGET_PER_CLASS` — целевой размер каждого «малого» класса.
+
+---
 
 ## Запуск
 
-### Установка зависимостей
+### Единичный пример из CLI
 
 ```bash
-pip install transformers sentencepiece sentence-transformers razdel tqdm torch
-```
-
-### Единичный пример
-
-```bash
-python -m backtranslate.main \
+python -m augmentation.backtranslate.main \
     --train data/train.csv \
     --output-dir out/ \
     --single "Уважаемый [PERSON]! Просим согласовать проезд техники через [OBJECT]."
 ```
 
-Вывод:
-```
-=== Back-translated ===
-Уважаемый [PERSON]! Просьба согласовать движение транспортных средств через [OBJECT].
-```
-
 ### Цикл по датасету
 
 ```bash
-python -m backtranslate.main \
+python -m augmentation.backtranslate.main \
     --train data/train.csv \
     --output-dir out/
 ```
 
-Генерирует:
-- `out/train_backtranslate_partial.csv` — промежуточные результаты (сохраняется каждые 10 примеров для возобновления при прерывании)
-- `out/train_backtranslate.csv` — итоговый датасет (оригинал + аугментация)
+Результаты:
 
-### Формат входного CSV
-
-```
-label,text
-invoice,"[ORGANIZATION] просит оплатить счёт [FINANCIAL_DATA] до [DATE_TIME]."
-access_request,"Прошу оформить пропуск для [PERSON] на объект [OBJECT]."
-```
-
-### Формат выходного CSV (partial)
-
-```
-label,text,source_text,cosine_sim,max_label_cosine_sim,augmentation_type
-invoice,"[ORGANIZATION] просит произвести оплату...","[ORGANIZATION] просит оплатить...",0.872,0.891,back_translation
-```
-
-***
-
-## Возобновление после прерывания
-
-Если процесс был прерван, повторный запуск с теми же аргументами автоматически загрузит `train_backtranslate_partial.csv` и продолжит с того места, где остановился — уже заполненные классы пропускаются.
+- `out/train_backtranslate_partial.csv` — промежуточные результаты (лог аугментов),
+- `out/train_backtranslate.csv` — итоговый датасет (оригинал + BT‑примеры).

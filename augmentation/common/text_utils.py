@@ -3,6 +3,9 @@ import html
 
 
 def preprocess_text(text: str) -> str:
+    """
+    Предварительная нормализация исходного текста перед генерацией.
+    """
     text = re.sub(r"[-=_*]{5,}", "—", text)
     text = re.sub(r"[.\s]{5,}", " ", text)
     text = re.sub(r"\s{2,}", " ", text)
@@ -19,11 +22,11 @@ _PH_GARBAGE_PATTERN = re.compile(
     (
       <\s*[A-Za-z]{1,4}[_\-\s]*\d+\s*>   # <PS_0>, <FH_10>, < PH-3 >
     |
-      \b[A-Z]{1,3}[HPh][_\-]?\d+\b        # HP_13, FH10, PH3
+      \b[A-Z]{1,3}[HPh][_\-]?\d+\b       # HP_13, FH10, PH3
     |
-      \b[Pp][Hh][\w.\-_]*\b               # PH, Ph_7, PH.24, pH-33
+      \b[Pp][Hh][\w.\-_]*\b              # PH, Ph_7, PH.24, pH-33
     |
-      \b[A-Z]{2,4}_\d+\b                  # CRR, PSG, RH_17
+      \b[A-Z]{2,4}_\d+\b                 # CRR_12, PSG_4
     )
     """,
     re.VERBOSE,
@@ -33,45 +36,93 @@ _PH_GARBAGE_PATTERN = re.compile(
 _HTML_ENTITY_PATTERN = re.compile(r"&(?:lt|gt|amp|quot|nbsp|apos);")
 
 # реквизитные заголовки без значимого содержания
-# ловит: "Телефон:", "e-mail:", "mail:", "адрес:", "и:", "или:"
+# ловит: "Телефон:", "e-mail:", "mail:", "адрес:", "бухгалтерия тел.:", "пто тел.:"
 _LABEL_NOISE_PATTERN = re.compile(
-    r"\b(?:тел(?:ефон)?|e[\-\s]?mail|mail|факс|fax|адрес|эл\.?\s*почта|бухгалтерия\s+тел|птo\s+тел)\s*:[\s,;.]*",
+    r"\b(?:тел(?:ефон)?|тел\.?|e[\-\s]?mail|mail|факс|fax|адрес|эл\.?\s*почта|бухгалтерия\s+тел|пто\s+тел)\s*:[\s,;.]*",
     re.IGNORECASE,
 )
 
 # паразитные строки вида "должность: - должность:" или ": и." или ":,"
-_COLON_NOISE_PATTERN = re.compile(r"(?:должность|контактный телефон|контакт)\s*:\s*[-—]*\s*", re.IGNORECASE)
+_COLON_NOISE_PATTERN = re.compile(
+    r"(?:должность|контактный телефон|контакт)\s*:\s*[-—]*\s*",
+    re.IGNORECASE,
+)
 
 # одиночные незначимые символы или их цепочки: "Щ Щ Щ", "*", "[]", "♪", "{>", "#>"
 _SYMBOL_NOISE_PATTERN = re.compile(
     r"""
     (
-      (?:[ЩщЪъЫы]\s+){2,}   # цепочки паразитных букв
+      (?:[ЩщЪъЫы]\s+){2,}        # цепочки паразитных букв
     |
-      [♪♫♬♩✓✗→←↑↓]          # музыкальные и стрелочные символы
+      [♪♫♬♩✓✗→←↑↓]               # музыкальные и стрелочные символы
     |
-      \{\s*[><!]             # {>, {!, {<
+      \{\s*[><!]                 # {>, {!, {<
     |
-      [#<>]\s*[><!]?         # #>, <., >.
+      [#<>]\s*[><!]?             # #>, <., >.
     |
-      \[\s*\]                # пустые скобки []
+      \[\s*\]                    # пустые скобки []
     |
-      \*\s*\.?\s*            # * или *.
+      \*\s*\.?\s*                # * или *.
     )
     """,
     re.VERBOSE,
 )
 
+# коннекторы без содержимого: "и:", "или:" в хвостах
+_CONNECTIVE_LABEL_NOISE_PATTERN = re.compile(
+    r"\b(?:и|или)\s*:\s*(?=[,;.!\s]|$)",
+    re.IGNORECASE,
+)
+
+# короткие "англоязычные" строки / хвосты без кириллицы — часто чистый мусор
+def _drop_pure_latin_short_lines(text: str) -> str:
+    lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # если нет кириллицы и строка короткая — считаем её артефактом
+        if not re.search(r"[А-Яа-я]", line) and len(line) <= 40:
+            continue
+        lines.append(line)
+    return " ".join(lines)
+
+
+def _dedup_repeated_tokens(text: str) -> str:
+    """
+    Схлопываем повторы типа 'Исполнитель: Исполнитель: Исполнитель'
+    или 'Исполнитель: Исполнитель:' в одно.
+    """
+    # повторяющиеся слова
+    text = re.sub(r"\b(\w+)(?:\s+\1\b){1,}", r"\1", text)
+    # повторяющиеся пары с двоеточием: "Исполнитель: Исполнитель:" → "Исполнитель:"
+    text = re.sub(r"\b(\w+:\s*)(\1){1,}", r"\1", text)
+    return text
+
 
 def clean_generated_text(text: str) -> str:
+    """
+    Пост-обработка сгенерированного текста (BT и paraphrase):
+    - раскодируем HTML-entities,
+    - вырезаем короткие англоязычные артефактные строки,
+    - убираем URL, хвосты "Телефон:, mail:, адрес: и:",
+    - чистим PH/PSG/CRR-артефакты, символический мусор и повторяющуюся пунктуацию,
+    - аккуратно нормализуем пробелы и "висячие" хвосты.
+    """
     # HTML entities → нормальные символы
     text = html.unescape(text)
+
+    # выбрасываем короткие строки без кириллицы — типичные артефакты
+    text = _drop_pure_latin_short_lines(text)
 
     # убираем URL
     text = _URL_PATTERN.sub("", text)
 
-    # убираем реквизитные заголовки-одиночки
+    # убираем реквизитные заголовки-одиночки без значимого содержимого
     text = _LABEL_NOISE_PATTERN.sub("", text)
+
+    # убираем "и:" / "или:" как пустой хвост
+    text = _CONNECTIVE_LABEL_NOISE_PATTERN.sub("", text)
 
     # убираем "должность: -" и подобные хвосты
     text = _COLON_NOISE_PATTERN.sub("", text)
@@ -85,6 +136,9 @@ def clean_generated_text(text: str) -> str:
     # вычищаем PH-артефакты
     text = _PH_GARBAGE_PATTERN.sub("", text)
 
+    # схлопываем повторяющиеся токены/фразы
+    text = _dedup_repeated_tokens(text)
+
     # нормализуем пробелы
     text = _SPACES_PATTERN.sub(" ", text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
@@ -96,6 +150,10 @@ def clean_generated_text(text: str) -> str:
 
 
 def clean_aug_result(text: str) -> str:
+    """
+    Лёгкая нормализация результатов генерации/перевода.
+    Используется там, где не нужна тяжёлая чистка.
+    """
     text = re.sub(r"([,.!?])\1{2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s+,", ",", text)
@@ -104,6 +162,10 @@ def clean_aug_result(text: str) -> str:
 
 
 def is_highly_formal(text: str) -> bool:
+    """
+    Эвристика для отсева сверхформальных, реквизитных текстов
+    (применяется только в перефразе, BT идёт всегда).
+    """
     digits = sum(ch.isdigit() for ch in text)
     uppers = sum(ch.isupper() for ch in text)
     letters = sum(ch.isalpha() for ch in text)

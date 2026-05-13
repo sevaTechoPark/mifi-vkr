@@ -90,7 +90,7 @@ def run_augmentation_loop(
     label_to_embs = {}
 
     round_idx = 0
-    max_rounds = 20
+    max_rounds = 40
 
     while round_idx < max_rounds:
         round_idx += 1

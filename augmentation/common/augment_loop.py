@@ -137,7 +137,7 @@ def run_augmentation_loop(
             label_embs = label_to_embs[label]
 
             attempts = 0
-            max_attempts = max(1, orig_count * 3)
+            max_attempts = max(1, orig_count * 5)
             orig_idx = 0
             added_for_label_this_round = 0
 

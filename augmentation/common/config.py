@@ -2,6 +2,10 @@ TARGET_PER_CLASS = 30
 EMBED_MODEL_NAME = "deepvk/USER2-base"
 RUGPT_MODEL_NAME = "sberbank-ai/rugpt3small_based_on_gpt2"
 
+LOOP_MAX_ROUNDS = 25
+# max_attempts = max(1, orig_count * LOOP_LABEL_ATTEMPTS_COEFFICIENT)
+LOOP_LABEL_ATTEMPTS_COEFFICIENT = 5
+
 SIM_LABEL_MIN = 0.8
 SIM_LABEL_MAX = 0.98
 # ── Back-translation ───────────────────────────────────────────────

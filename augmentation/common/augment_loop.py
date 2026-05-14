@@ -15,6 +15,8 @@ from .config import (
     SIM_LABEL_MAX,
     SHORT_TEXT_THRESHOLD,
     PARAPHRASE_MIN_LEN_RATIO_SHORT,
+    LOOP_LABEL_ATTEMPTS_COEFFICIENT,
+    LOOP_MAX_ROUNDS,
 )
 from .embeddings import cos_sim
 
@@ -90,7 +92,7 @@ def run_augmentation_loop(
     label_to_embs = {}
 
     round_idx = 0
-    max_rounds = 25
+    max_rounds = LOOP_MAX_ROUNDS
 
     while round_idx < max_rounds:
         round_idx += 1
@@ -137,7 +139,7 @@ def run_augmentation_loop(
             label_embs = label_to_embs[label]
 
             attempts = 0
-            max_attempts = max(1, orig_count * 5)
+            max_attempts = max(1, orig_count * LOOP_LABEL_ATTEMPTS_COEFFICIENT)
             orig_idx = 0
             added_for_label_this_round = 0
 

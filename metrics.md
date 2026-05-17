@@ -137,3 +137,44 @@ ruRoberta-large AutoModel train_augmented_summarized.csv balanced_accuracy: 0.31
 ruRoberta-large AutoModel train_augmented_original_plus_summary.csv balanced_accuracy: 0.454132, macro_f1: 0.465529
 ruRoberta-large meanPooling train_augmented_summarized.csv balanced_accuracy: 0.347784, macro_f1: 0.335338
 ruRoberta-large meanPooling train_augmented_original_plus_summary.csv balanced_accuracy: 0.027778, macro_f1: 0.006495
+
+
+# Финал
+
+train.csv
+BASELINE METRICS: {'balanced_accuracy': 0.453, 'macro_f1': 0.457}
+cosine_similarity centroid balanced_accuracy: 0.292170, macro_f1: 0.284682
+cosine_similarity nearest balanced_accuracy: 0.275707, macro_f1: 0.281212
+hybrid MLP {'balanced_accuracy': 0.395906, 'macro_f1': 0.33791}
+hybrid classical linear_svc: {'balanced_accuracy': 0.090759, 'macro_f1': 0.069604}
+hybrid classical logreg: {'balanced_accuracy': 0.290956, 'macro_f1': 0.293944}
+bert-classification balanced_accuracy: 0.425743, f1_macro: 0.411781
+
+
+train_augmented.csv
+BASELINE METRICS: {'balanced_accuracy': 0.45, 'macro_f1': 0.451}
+cosine_similarity centroid balanced_accuracy: 0.193717, macro_f1: 0.181343
+cosine_similarity nearest balanced_accuracy: 0.271739, macro_f1: 0.274458
+hybrid MLP {'balanced_accuracy': 0.335138, 'macro_f1': 0.341959}
+hybrid classical linear_svc: {'balanced_accuracy': 0.190911, 'macro_f1': 0.181632}
+hybrid classical logreg: {'balanced_accuracy': 0.285809, 'macro_f1': 0.289734}
+bert-classification balanced_accuracy: 0.438685, f1_macro: 0.453429
+
+train_augmented_summarized.csv
+BASELINE METRICS: {'balanced_accuracy': 0.367, 'macro_f1': 0.374}
+cosine_similarity centroid balanced_accuracy: 0.079263, macro_f1: 0.065406
+cosine_similarity nearest balanced_accuracy: 0.062285, macro_f1: 0.046978
+hybrid MLP {'balanced_accuracy': 0.090498, 'macro_f1': 0.060165}
+hybrid classical linear_svc: {'balanced_accuracy': 0.046102, 'macro_f1': 0.030962}
+hybrid classical logreg: {'balanced_accuracy': 0.08278, 'macro_f1': 0.037228}
+bert-classification balanced_accuracy: 0.307292, f1_macro: 0.314362
+
+train_augmented_original_plus_summary.csv
+BASELINE METRICS: {'balanced_accuracy': 0.447, 'macro_f1': 0.454}
+cosine_similarity centroid balanced_accuracy: 0.223789, macro_f1: 0.204955
+cosine_similarity nearest balanced_accuracy: 0.257947, macro_f1: 0.260026
+hybrid MLP {'balanced_accuracy': 0.317924, 'macro_f1': 0.328401}
+hybrid classical linear_svc: {'balanced_accuracy': 0.188499, 'macro_f1': 0.167312}
+hybrid classical logreg: {'balanced_accuracy': 0.268598, 'macro_f1': 0.266093}
+bert-classification balanced_accuracy: 0.456408, f1_macro: 0.468830
+

@@ -11,7 +11,7 @@ class HybridModelConfig:
     pooling: str = "mean_max"
     chunk_aggregation: str = "mean_max"
     batch_size: int = 8
-    bert_weight: float = 50.0
+    bert_weight: float = 5.0
 
 
 @dataclass

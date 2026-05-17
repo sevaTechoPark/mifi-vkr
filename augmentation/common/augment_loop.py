@@ -147,7 +147,12 @@ def run_augmentation_loop(
                 attempts += 1
                 source_text = texts_orig[orig_idx]
 
-                aug_text = augment_fn(source_text)
+                try:
+                    aug_text = augment_fn(source_text)
+                except Exception as e:
+                    print(f"[ERROR] augment_fn failed: {e}")
+                    orig_idx = (orig_idx + 1) % orig_count
+                    continue
 
                 len_src = len(source_text)
                 len_aug = len(aug_text)

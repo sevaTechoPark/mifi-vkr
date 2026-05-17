@@ -178,3 +178,21 @@ hybrid classical linear_svc: {'balanced_accuracy': 0.188499, 'macro_f1': 0.16731
 hybrid classical logreg: {'balanced_accuracy': 0.268598, 'macro_f1': 0.266093}
 bert-classification balanced_accuracy: 0.456408, f1_macro: 0.468830
 
+# Финал финал
+
+train.csv
+BASELINE METRICS: {'balanced_accuracy': 0.534, 'macro_f1': 0.543}
+cosine_similarity centroid balanced_accuracy: 0.248780, macro_f1: 0.253307
+cosine_similarity nearest balanced_accuracy: 0.256835, macro_f1: 0.248612
+hybrid MLP {'balanced_accuracy': 0.32134, 'macro_f1': 0.350215}
+hybrid classical linear_svc: {'balanced_accuracy': 0.341969, 'macro_f1': 0.314718}
+hybrid classical logreg: {'balanced_accuracy': 0.274202, 'macro_f1': 0.196601}
+[custom_embeder] cosine_similarity centroid 
+[custom_embeder] cosine_similarity nearest 
+[custom_embeder] hybrid MLP 
+[custom_embeder] hybrid classical linear_svc: 
+[custom_embeder] hybrid classical logreg: 
+bert-classification balanced_accuracy: balanced_accuracy: 0.420833, f1_macro: 0.393838
+
+
+

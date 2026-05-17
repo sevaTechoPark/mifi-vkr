@@ -9,14 +9,8 @@ from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """
-    CLI под EmbeddingConfig:
-      --input-csv, --output-npy, --output-csv, --model-dir
-      и по одному аргументу для каждого НЕ-булевого поля EmbeddingConfig:
-      --max-length, --chunk-size, --pooling, ...
-    """
     parser = argparse.ArgumentParser(
-        description="Embed texts with fine-tuned ruRoberta"
+        description="Embed texts with fine-tuned ruRoberta encoder"
     )
 
     parser.add_argument("--input-csv", type=str, required=True)
@@ -27,7 +21,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     defaults = {f.name: f.default for f in fields(EmbeddingConfig)}
     for f in fields(EmbeddingConfig):
         default = defaults[f.name]
-        # булевые поля (normalize_chunks, normalize_document, add_global_chunk) не даём как type=bool
         if isinstance(default, bool):
             continue
         arg_name = f"--{f.name.replace('_', '-')}"
@@ -42,15 +35,12 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.input_csv)
-    # сейчас считаем, что колонка с текстом называется "text"
     df = df[["text"]].dropna().copy()
     df["text"] = df["text"].astype(str).str.strip()
     df = df[df["text"] != ""].reset_index(drop=True)
 
-    # базовая конфигурация
     cfg = EmbeddingConfig()
 
-    # переопределения из CLI
     overrides = {}
     for f in fields(EmbeddingConfig):
         if not hasattr(args, f.name):

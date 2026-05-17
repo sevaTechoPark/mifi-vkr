@@ -1,27 +1,35 @@
+from __future__ import annotations
+
+import argparse
 import gc
 import json
-import math
+import random
 import shutil
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
+import numpy as np
 import torch
 from datasets import Dataset
-from transformers import (
-    AutoTokenizer,
-    RobertaConfig,
-    RobertaForMaskedLM,
-    DataCollatorForLanguageModeling,
-    TrainingArguments,
-    Trainer,
-    TrainerCallback,
-    EarlyStoppingCallback,
-    TrainerControl,
-    TrainerState,
+from sentence_transformers import (
+    SentenceTransformer,
+    SentenceTransformerTrainer,
+    SentenceTransformerTrainingArguments,
+    losses,
+    models,
 )
+from sentence_transformers.evaluation import (
+    BinaryClassificationEvaluator,
+    EmbeddingSimilarityEvaluator,
+)
+from transformers import EarlyStoppingCallback
 
 from bert_embeddings.config import MLMConfig, ensure_dir
-from bert_embeddings.data_utils import build_mlm_corpus
+from bert_embeddings.data_utils import (
+    build_pair_dataframe,
+    build_training_dataframe,
+    explode_long_texts_for_training,
+)
 
 
 def cleanup_memory():
@@ -30,76 +38,102 @@ def cleanup_memory():
         torch.cuda.empty_cache()
 
 
-def save_encoder_only_from_mlm(model, save_dir, meta=None):
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def build_sentence_transformer(
+    model_name: str,
+    max_length: int,
+    pooling: str,
+) -> SentenceTransformer:
+    transformer = models.Transformer(
+        model_name,
+        max_seq_length=max_length,
+        model_kwargs={"torch_dtype": "float32"},
+    )
+
+    pooling = pooling.lower().strip()
+    pooling_model = models.Pooling(
+        transformer.get_word_embedding_dimension(),
+        pooling_mode_mean_tokens=(pooling == "mean"),
+        pooling_mode_max_tokens=(pooling == "max"),
+        pooling_mode_cls_token=(pooling == "cls"),
+    )
+
+    normalize = models.Normalize()
+    return SentenceTransformer(modules=[transformer, pooling_model, normalize])
+
+
+def save_encoder_only_from_sentence_transformer(
+    model: SentenceTransformer,
+    save_dir: str | Path,
+    meta=None,
+):
     save_path = ensure_dir(save_dir)
-    torch.save(model.state_dict(), save_path / "pytorch_model.bin")
+
+    transformer_module = model[0]
+    auto_model = transformer_module.auto_model
+    tokenizer = transformer_module.tokenizer
+
+    state_dict = auto_model.state_dict()
+    exported = {}
+    for k, v in state_dict.items():
+        if k.startswith("roberta."):
+            exported[k] = v.detach().cpu()
+        elif k.startswith("embeddings.") or k.startswith("encoder.") or k.startswith("pooler."):
+            exported[f"roberta.{k}"] = v.detach().cpu()
+        else:
+            exported[f"roberta.{k}"] = v.detach().cpu()
+
+    torch.save(exported, save_path / "pytorch_model.bin")
+    auto_model.config.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
+
     with open(save_path / "mlm_meta.json", "w", encoding="utf-8") as f:
         json.dump(meta or {}, f, ensure_ascii=False, indent=2)
 
 
-class CustomMLMCheckpointCallback(TrainerCallback):
-    """
-    Сохраняет encoder-only чекпоинты каждые N эпох.
-    best_model сохраняется в on_train_end, когда Trainer уже загрузил
-    лучшие веса через load_best_model_at_end=True.
-    """
-    def __init__(self, output_dir, save_every_n_epochs=3, tokenizer=None, meta_fn=None):
-        self.output_dir = Path(output_dir)
-        self.checkpoints_dir = ensure_dir(self.output_dir / "checkpoints")
-        self.best_model_dir = self.output_dir / "best_model"
-        self.tokenizer = tokenizer
-        self.save_every_n_epochs = max(1, int(save_every_n_epochs))
-        self.best_eval_loss = float("inf")
-        self.best_epoch = None
-        self.meta_fn = meta_fn
+def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
+    raw_df = build_training_dataframe(
+        train_file,
+        test_file,
+        text_col=cfg.text_col,
+        label_col=cfg.label_col,
+    )
 
-    def _save_epoch_checkpoint(self, model, epoch):
-        ckpt_dir = self.checkpoints_dir / f"epoch_{epoch:03d}"
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
-        meta = (self.meta_fn() if self.meta_fn else {})
-        meta.update({"type": "mlm_domain_encoder_checkpoint", "epoch": epoch})
-        save_encoder_only_from_mlm(model, ckpt_dir, meta=meta)
-        if self.tokenizer:
-            self.tokenizer.save_pretrained(ckpt_dir)
+    exploded_df = explode_long_texts_for_training(
+        raw_df,
+        model_name=cfg.model_name,
+        text_col=cfg.text_col,
+        label_col=cfg.label_col,
+        max_length=cfg.max_length,
+        chunk_size=cfg.train_chunk_size,
+        chunk_overlap=cfg.train_chunk_overlap,
+        add_global_chunk=cfg.add_global_chunk_to_training,
+    )
 
-    def on_evaluate(self, args, state, control, metrics=None, model=None, **kwargs):
-        if state.epoch is None or metrics is None:
-            return control
-        epoch_num = int(round(state.epoch))
-        eval_loss = metrics.get("eval_loss")
+    pair_df = build_pair_dataframe(
+        exploded_df,
+        text_col=cfg.text_col,
+        label_col=cfg.label_col,
+        max_pairs_per_label=cfg.max_pairs_per_label,
+        max_negative_pairs=cfg.max_negative_pairs,
+        seed=cfg.seed,
+    )
 
-        if eval_loss is not None and eval_loss < self.best_eval_loss:
-            self.best_eval_loss = eval_loss
-            self.best_epoch = epoch_num
+    if len(pair_df) == 0:
+        raise ValueError("No training pairs were built from text/label data.")
 
-        if epoch_num % self.save_every_n_epochs == 0:
-            self._save_epoch_checkpoint(model, epoch_num)
+    val_size = min(max(cfg.val_size, 0.01), 0.3)
+    ds = Dataset.from_pandas(pair_df, preserve_index=False)
+    split_ds = ds.train_test_split(test_size=val_size, seed=cfg.seed)
 
-        return control
-
-    def on_train_end(self, args, state, control, model=None, **kwargs):
-        """
-        К этому моменту load_best_model_at_end уже загрузил лучшие веса в model.
-        Сохраняем их как encoder-only best_model и сразу чистим _trainer_tmp.
-        """
-        if model is None:
-            return control
-
-        if self.best_model_dir.exists():
-            shutil.rmtree(self.best_model_dir)
-        self.best_model_dir.mkdir(parents=True, exist_ok=True)
-
-        meta = (self.meta_fn() if self.meta_fn else {})
-        meta.update({
-            "type": "mlm_domain_encoder_best",
-            "best_eval_loss": self.best_eval_loss,
-            "best_epoch": self.best_epoch,
-        })
-        save_encoder_only_from_mlm(model, self.best_model_dir, meta=meta)
-        if self.tokenizer:
-            self.tokenizer.save_pretrained(self.best_model_dir)
-
-        return control
+    return raw_df, exploded_df, pair_df, split_ds["train"], split_ds["test"]
 
 
 def run_from_params(
@@ -109,20 +143,6 @@ def run_from_params(
     cfg: MLMConfig | None = None,
     **kwargs,
 ):
-    """
-    Дефолты живут только в MLMConfig (config.py).
-
-    Переопределение через kwargs:
-        run_from_params(..., num_epochs=40, learning_rate=2e-5)
-
-    Или через готовый cfg:
-        run_from_params(..., cfg=MLMConfig(num_train_epochs=40))
-
-    Алиасы kwargs для обратной совместимости:
-        num_epochs                → num_train_epochs
-        batch_size                → train_batch_size
-        checkpoint_every_n_epochs — отдельный аргумент (не поле MLMConfig)
-    """
     if cfg is None:
         cfg = MLMConfig()
 
@@ -141,133 +161,209 @@ def run_from_params(
 
     cfg = replace(cfg, fp16=torch.cuda.is_available())
     cleanup_memory()
+    set_seed(cfg.seed)
 
     output_dir = ensure_dir(output_dir)
     metrics_path = output_dir / "metrics.json"
+    checkpoints_dir = ensure_dir(output_dir / "checkpoints")
+    best_model_dir = output_dir / "best_model"
+    final_model_dir = output_dir / "final_model"
+    trainer_tmp_dir = output_dir / "_trainer_tmp"
 
-    raw_df = build_mlm_corpus(train_file, test_file, text_col=cfg.text_col)
-    print(f"MLM corpus size: {len(raw_df)}")
-
-    full_ds = Dataset.from_pandas(raw_df, preserve_index=False)
-    split_ds = full_ds.train_test_split(test_size=cfg.val_size, seed=cfg.seed)
-    train_ds, valid_ds = split_ds["train"], split_ds["test"]
-
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
-
-    def tokenize_for_mlm(batch):
-        return tokenizer(batch[cfg.text_col], truncation=True, max_length=cfg.max_length)
-
-    train_ds = train_ds.map(tokenize_for_mlm, batched=True, remove_columns=[cfg.text_col])
-    valid_ds = valid_ds.map(tokenize_for_mlm, batched=True, remove_columns=[cfg.text_col])
-
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=True,
-        mlm_probability=cfg.mlm_probability,
+    raw_df, exploded_df, pair_df, train_ds, valid_ds = build_train_and_eval_pairs(
+        cfg, train_file, test_file
     )
 
-    model = RobertaForMaskedLM.from_pretrained(
-        cfg.model_name,
-        config=RobertaConfig.from_pretrained(cfg.model_name),
+    model = build_sentence_transformer(
+        model_name=cfg.model_name,
+        max_length=cfg.max_length,
+        pooling=cfg.sentence_pooling,
     )
 
-    def build_meta():
-        return {k: getattr(cfg, k) for k in MLMConfig.__dataclass_fields__}
+    train_loss = cfg.train_loss.lower().strip()
 
-    tmp_root = Path("/tmp") / "bert_embeddings_trainer"
-    tmp_root.mkdir(parents=True, exist_ok=True)
+    if train_loss == "cosent":
+        loss = losses.CoSENTLoss(model)
+        train_ds = train_ds.remove_columns(["label"])
+        valid_ds_for_trainer = valid_ds.remove_columns(["label"])
 
-    training_args = TrainingArguments(
-        output_dir=str(tmp_root),
+        evaluator = EmbeddingSimilarityEvaluator(
+            sentences1=valid_ds["sentence1"],
+            sentences2=valid_ds["sentence2"],
+            scores=[float(x) for x in valid_ds["score"]],
+            name="valid-sim",
+        )
+        metric_for_best_model = "eval_valid-sim_spearman_cosine"
+        greater_is_better = True
+    else:
+        loss = losses.SoftmaxLoss(
+            model=model,
+            sentence_embedding_dimension=model.get_sentence_embedding_dimension(),
+            num_labels=2,
+        )
+        train_ds = train_ds.remove_columns(["score"])
+        valid_ds_for_trainer = valid_ds.remove_columns(["score"])
+
+        evaluator = BinaryClassificationEvaluator(
+            sentences1=valid_ds["sentence1"],
+            sentences2=valid_ds["sentence2"],
+            labels=[int(x) for x in valid_ds["label"]],
+            name="valid-binary",
+        )
+        metric_for_best_model = "eval_valid-binary_cosine_ap"
+        greater_is_better = True
+
+    args = SentenceTransformerTrainingArguments(
+        output_dir=str(trainer_tmp_dir),
+        num_train_epochs=cfg.num_train_epochs,
         per_device_train_batch_size=cfg.train_batch_size,
         per_device_eval_batch_size=cfg.eval_batch_size,
         learning_rate=cfg.learning_rate,
         weight_decay=cfg.weight_decay,
-        num_train_epochs=cfg.num_train_epochs,
         warmup_ratio=cfg.warmup_ratio,
         logging_steps=cfg.logging_steps,
         eval_strategy="epoch",
         save_strategy="epoch",
-        save_total_limit=1,
+        save_total_limit=2,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
+        metric_for_best_model=metric_for_best_model,
+        greater_is_better=greater_is_better,
+        seed=cfg.seed,
         report_to="none",
         fp16=cfg.fp16,
-        seed=cfg.seed,
+        bf16=False,
     )
 
-
-    checkpoint_callback = CustomMLMCheckpointCallback(
-        output_dir=output_dir,
-        save_every_n_epochs=checkpoint_every,
-        tokenizer=tokenizer,
-        meta_fn=build_meta,
-    )
-
-    trainer = Trainer(
+    trainer = SentenceTransformerTrainer(
         model=model,
-        args=training_args,
+        args=args,
         train_dataset=train_ds,
-        eval_dataset=valid_ds,
-        data_collator=data_collator,
-        callbacks=[
-            checkpoint_callback,
-            EarlyStoppingCallback(
-                early_stopping_patience=cfg.early_stopping_patience
-            ),
-        ],
+        eval_dataset=valid_ds_for_trainer,
+        loss=loss,
+        evaluator=evaluator,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=cfg.early_stopping_patience)],
     )
 
     trainer.train()
-
-    # финальная оценка уже на лучшей модели (load_best_model_at_end=True)
     eval_metrics = trainer.evaluate()
 
+    meta = {k: getattr(cfg, k) for k in MLMConfig.__dataclass_fields__}
+    meta.update(
+        {
+            "type": "sentence_transformer_domain_encoder",
+            "train_file": str(train_file),
+            "test_file": str(test_file),
+            "raw_doc_count": int(len(raw_df)),
+            "train_view_count": int(len(exploded_df)),
+            "pair_count": int(len(pair_df)),
+            "train_pair_count": int(len(train_ds)),
+            "valid_pair_count": int(len(valid_ds)),
+        }
+    )
+
+    for target_dir in [best_model_dir, final_model_dir]:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        save_encoder_only_from_sentence_transformer(model, target_dir, meta=meta)
+        if cfg.save_sentence_transformer_artifacts:
+            model.save(str(target_dir / "sentence_transformer"))
+
+    for epoch_idx in range(checkpoint_every, cfg.num_train_epochs + 1, checkpoint_every):
+        ckpt_dir = checkpoints_dir / f"epoch_{epoch_idx:03d}"
+        if ckpt_dir.exists():
+            shutil.rmtree(ckpt_dir)
+        save_encoder_only_from_sentence_transformer(
+            model,
+            ckpt_dir,
+            meta={
+                **meta,
+                "epoch": epoch_idx,
+                "type": "sentence_transformer_domain_encoder_checkpoint",
+            },
+        )
+
     metrics = {
-        **build_meta(),
-        "train_file": str(train_file),
-        "test_file": str(test_file),
-        "eval_loss": eval_metrics.get("eval_loss"),
-        "perplexity": math.exp(eval_metrics["eval_loss"]) if "eval_loss" in eval_metrics else None,
-        "best_eval_loss": checkpoint_callback.best_eval_loss,
-        "best_epoch": checkpoint_callback.best_epoch,
+        **meta,
+        **{
+            k: (float(v) if isinstance(v, (np.floating, float)) else v)
+            for k, v in eval_metrics.items()
+        },
         "checkpoint_every_n_epochs": checkpoint_every,
     }
 
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
-    # tokenizer уже сохранён в best_model/ через on_train_end,
-    # но на случай если on_train_end не сработал — сохраним ещё раз
-    best_model_dir = output_dir / "best_model"
-    if best_model_dir.exists():
-        tokenizer.save_pretrained(str(best_model_dir))
+    if trainer_tmp_dir.exists():
+        shutil.rmtree(trainer_tmp_dir, ignore_errors=True)
 
     components = {
         "output_dir": str(output_dir),
-        "checkpoints_dir": str(output_dir / "checkpoints"),
+        "checkpoints_dir": str(checkpoints_dir),
         "best_model_dir": str(best_model_dir),
+        "final_model_dir": str(final_model_dir),
         "metrics_path": str(metrics_path),
         "model_name": cfg.model_name,
     }
 
-    best_ppl = (
-        math.exp(checkpoint_callback.best_eval_loss)
-        if checkpoint_callback.best_eval_loss < float("inf")
-        else None
-    )
     print("\n" + "=" * 56)
     print("Training finished.")
-    print(
-        f"  Best model  → epoch {checkpoint_callback.best_epoch}, "
-        f"eval_loss={checkpoint_callback.best_eval_loss:.6f}, "
-        f"perplexity={best_ppl:.4f}"
-    )
-    print(
-        f"  Best model dir : {components['best_model_dir']}"
-    )
-    print(f"  Metrics path   : {components['metrics_path']}")
+    print(f"  Raw docs      : {len(raw_df)}")
+    print(f"  Train views   : {len(exploded_df)}")
+    print(f"  Pair count    : {len(pair_df)}")
+    print(f"  Best model    : {components['best_model_dir']}")
+    print(f"  Final model   : {components['final_model_dir']}")
+    print(f"  Metrics path  : {components['metrics_path']}")
     print("=" * 56)
 
     return components, metrics
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Train sentence embeddings for ruRoberta with text/label input."
+    )
+
+    parser.add_argument("--train-file", type=str, required=True)
+    parser.add_argument("--test-file", type=str, required=True)
+    parser.add_argument("--output-dir", type=str, required=True)
+
+    defaults = {f.name: f.default for f in fields(MLMConfig)}
+    for f in fields(MLMConfig):
+        default = defaults[f.name]
+        if isinstance(default, bool):
+            continue
+        arg_name = f"--{f.name.replace('_', '-')}"
+        arg_type = type(default)
+        parser.add_argument(arg_name, type=arg_type, default=None)
+
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    cfg = MLMConfig()
+
+    overrides = {}
+    for f in fields(MLMConfig):
+        if not hasattr(args, f.name):
+            continue
+        val = getattr(args, f.name)
+        if val is not None:
+            overrides[f.name] = val
+
+    if overrides:
+        cfg = replace(cfg, **overrides)
+
+    run_from_params(
+        train_file=args.train_file,
+        test_file=args.test_file,
+        output_dir=args.output_dir,
+        cfg=cfg,
+    )
+
+
+if __name__ == "__main__":
+    main()

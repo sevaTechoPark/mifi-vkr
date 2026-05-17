@@ -1,6 +1,9 @@
+from __future__ import annotations
+
+from pathlib import Path
+
 import numpy as np
 import torch
-from pathlib import Path
 from transformers import AutoTokenizer, RobertaConfig, RobertaModel
 
 from bert_embeddings.config import EmbeddingConfig
@@ -73,9 +76,15 @@ class LongTextRobertaEmbedder:
                 device = "cpu"
         self.device = device
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name)
-        roberta_cfg = RobertaConfig.from_pretrained(self.base_model_name)
-        self.model = RobertaModel.from_pretrained(self.base_model_name, config=roberta_cfg)
+        tokenizer_source = str(self.model_dir) if self.model_dir and self.model_dir.exists() else self.base_model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
+
+        if self.model_dir is not None and (self.model_dir / "config.json").exists():
+            roberta_cfg = RobertaConfig.from_pretrained(str(self.model_dir))
+        else:
+            roberta_cfg = RobertaConfig.from_pretrained(self.base_model_name)
+
+        self.model = RobertaModel(roberta_cfg)
 
         if self.model_dir is not None:
             weights_path = self.model_dir / "pytorch_model.bin"
@@ -93,6 +102,8 @@ class LongTextRobertaEmbedder:
             print(f"Missing keys: {len(missing)}")
             print(f"Unexpected keys: {len(unexpected)}")
         else:
+            base_model = RobertaModel.from_pretrained(self.base_model_name, config=roberta_cfg)
+            self.model.load_state_dict(base_model.state_dict(), strict=True)
             print(f"Using base model without local fine-tuned weights: {self.base_model_name}")
 
         self.model.to(self.device)
@@ -130,7 +141,7 @@ class LongTextRobertaEmbedder:
 
         if self.add_global_chunk and len(token_ids) > self.chunk_size:
             head = token_ids[: self.chunk_size // 2]
-            tail = token_ids[-(self.chunk_size - len(head)):]
+            tail = token_ids[-(self.chunk_size - len(head)) :]
             global_piece = (
                 [self.tokenizer.cls_token_id]
                 + (head + tail)[: self.max_length - 2]

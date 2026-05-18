@@ -21,15 +21,19 @@ def print_label_counts(df: pd.DataFrame, title: str) -> None:
         print(f"label={label} | count={int(count)}")
 
 
+def path_arg(p: str) -> Path:
+    return Path(p).expanduser().resolve()
+
+
 def merge_augmentations(
     para_file: str | Path,
     bt_file: str | Path,
     output_dir: str | Path,
     output_name: str = "train_augmented.csv",
 ) -> pd.DataFrame:
-    para_file = Path(para_file)
-    bt_file = Path(bt_file)
-    output_dir = Path(output_dir)
+    para_file = Path(para_file).expanduser().resolve()
+    bt_file = Path(bt_file).expanduser().resolve()
+    output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     train_file = output_dir / "train.csv"
@@ -95,19 +99,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge train, paraphrase and backtranslate datasets")
     parser.add_argument(
         "--para-file",
-        type=Path,
+        type=path_arg,
         required=True,
         help="Path to train_paraphrase.csv",
     )
     parser.add_argument(
         "--bt-file",
-        type=Path,
+        type=path_arg,
         required=True,
         help="Path to train_backtranslate.csv",
     )
     parser.add_argument(
         "--output-dir",
-        type=Path,
+        type=path_arg,
         required=True,
         help="Directory with train.csv and where train_augmented.csv will be saved",
     )

@@ -1,109 +1,156 @@
 import os
+import json
 import argparse
+import warnings
 
+import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.metrics import balanced_accuracy_score, f1_score
+from sklearn.naive_bayes import ComplementNB, MultinomialNB
 from sklearn.svm import LinearSVC
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.preprocessing import normalize
 
 
-def eval_model(model, X_test, y_test):
+def _eval(y_true, y_pred):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UndefinedMetricWarning)
+        return {
+            "balanced_accuracy": round(float(balanced_accuracy_score(y_true, y_pred)), 6),
+            "macro_f1": round(float(f1_score(y_true, y_pred, average="macro", zero_division=0)), 6),
+        }
+
+
+def _fit_eval(name, model, X_train, y_train, X_test, y_test, results):
+    model.fit(X_train, y_train)
     pred = model.predict(X_test)
-    return {
-        "balanced_accuracy": round(balanced_accuracy_score(y_test, pred), 6),
-        "macro_f1": round(f1_score(y_test, pred, average="macro", zero_division=0), 6),
-    }
+    metrics = _eval(y_test, pred)
+    print(f"{name}: {metrics}")
+    results.append({"model": name, **metrics})
 
 
-def build_tfidf_only(vecdir, text_col: str = "text", label_col: str = "label"):
-    train_path = os.path.join(vecdir, "y_train.csv")
-    test_path = os.path.join(vecdir, "y_test.csv")
-    meta_path = os.path.join(vecdir, "meta.json")
+def run_classical(
+    vecdir: str,
+    class_weight: str | None = None,
+    include_tfidf_only: bool = True,
+):
+    """
+    Запускает набор линейных моделей на гибридных векторах + (опц.) TF-IDF-only baseline.
 
-    # Для TF-IDF-only нам нужны исходные тексты.
-    # Предполагается, что рядом с гибридными векторами лежат исходные train/test CSV.
-    # Если их нет — этот baseline можно отключить или передавать пути отдельно.
-    raise_if_missing = []
-    for p in (train_path, test_path):
-        if not os.path.exists(p):
-            raise_if_missing.append(p)
-    if raise_if_missing:
-        raise FileNotFoundError(
-            f"Cannot build TF-IDF-only baseline, missing files: {raise_if_missing}"
-        )
-
-    # Здесь предполагается, что исходные данные лежат рядом с vecdir.
-    # Если у тебя другая структура, проще сделать отдельный скрипт для TF-IDF-only.
-    raise NotImplementedError(
-        "TF-IDF-only baseline requires access to original train/test texts. "
-        "Подстрой этот блок под свою структуру данных."
-    )
-
-
-def run_classical(vecdir: str):
-    # Гибридные векторы для линейных моделей
+    class_weight:
+      - None      → веса классов выключены (часто лучше на средне-дисбалансированных датасетах)
+      - "balanced" → class_weight="balanced" sklearn (старое поведение)
+    include_tfidf_only:
+      - True  → пытается найти texts_train.csv/texts_test.csv и запустить MultinomialNB+ComplementNB
+                на чистом TF-IDF (без BERT-блока) как доп. baseline
+    """
     X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz"))
     X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz"))
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
 
-    models = {
-        "linear_svc": LinearSVC(
-            class_weight="balanced",
-            max_iter=10000,
-            dual=False,
-            random_state=42,
+    results: list = []
+
+    print(f"--- hybrid (TF-IDF + BERT) | class_weight={class_weight!r} ---")
+
+    base_kwargs = {"random_state": 42}
+    if class_weight is not None:
+        base_kwargs["class_weight"] = class_weight
+
+    _fit_eval(
+        "linear_svc",
+        LinearSVC(max_iter=10000, dual=False, **base_kwargs),
+        X_train, y_train, X_test, y_test, results,
+    )
+
+    _fit_eval(
+        "linear_svc_calibrated",
+        CalibratedClassifierCV(
+            LinearSVC(max_iter=10000, dual=False, **base_kwargs),
+            method="sigmoid", cv=3,
         ),
-        "logreg": LogisticRegression(
-            class_weight="balanced",
-            max_iter=2000,
-            n_jobs=-1,
-            random_state=42,
-        ),
-    }
+        X_train, y_train, X_test, y_test, results,
+    )
 
-    results = []
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        metrics = eval_model(model, X_test, y_test)
-        results.append({"model": name, **metrics})
-        print(f"{name}: {metrics}")
+    _fit_eval(
+        "logreg",
+        LogisticRegression(max_iter=2000, n_jobs=-1, **base_kwargs),
+        X_train, y_train, X_test, y_test, results,
+    )
 
-    # Третий baseline: MultinomialNB на TF-IDF-only (без BERT)
-    # Важно: MultinomialNB требует неотрицательные features.
-    # Если хочешь TF-IDF-only baseline в этом же файле, нужно иметь доступ к исходным текстам.
-    # Здесь оставлен каркас — его нужно адаптировать под структуру проекта.
+    _fit_eval(
+        "ridge_classifier",
+        RidgeClassifier(**base_kwargs),
+        X_train, y_train, X_test, y_test, results,
+    )
 
-    # try:
-    #     X_train_tfidf, X_test_tfidf, y_train_tf, y_test_tf = build_tfidf_only(vecdir)
-    #     nb_model = MultinomialNB()
-    #     nb_model.fit(X_train_tfidf, y_train_tf)
-    #     nb_metrics = eval_model(nb_model, X_test_tfidf, y_test_tf)
-    #     results.append({"model": "multinomial_nb_tfidf_only", **nb_metrics})
-    #     print(f"multinomial_nb_tfidf_only: {nb_metrics}")
-    # except Exception as e:
-    #     print(f"Skipping MultinomialNB TF-IDF-only baseline: {e}")
+    if include_tfidf_only:
+        train_texts_path = os.path.join(vecdir, "texts_train.csv")
+        test_texts_path = os.path.join(vecdir, "texts_test.csv")
+
+        if os.path.exists(train_texts_path) and os.path.exists(test_texts_path):
+            print(f"\n--- TF-IDF only baseline ---")
+            train_df = pd.read_csv(train_texts_path)
+            test_df = pd.read_csv(test_texts_path)
+
+            text_col = train_df.columns[0]
+            label_col = train_df.columns[1]
+
+            tfidf = TfidfVectorizer(
+                analyzer="word", ngram_range=(1, 2),
+                min_df=2, max_df=0.98, sublinear_tf=True,
+                token_pattern=r"(?u)\b\w\w+\b",
+            )
+            Xtr = tfidf.fit_transform(train_df[text_col].astype(str))
+            Xte = tfidf.transform(test_df[text_col].astype(str))
+            ytr = train_df[label_col].astype(str)
+            yte = test_df[label_col].astype(str)
+
+            _fit_eval("multinomial_nb_tfidf_only", MultinomialNB(),
+                      Xtr, ytr, Xte, yte, results)
+            _fit_eval("complement_nb_tfidf_only", ComplementNB(),
+                      Xtr, ytr, Xte, yte, results)
+            nb_lr = LogisticRegression(max_iter=2000, n_jobs=-1, **base_kwargs)
+            _fit_eval("logreg_tfidf_only", nb_lr, Xtr, ytr, Xte, yte, results)
+
+    # Сохраняем сводку
+    out_path = os.path.join(vecdir, "classical_results.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "class_weight": class_weight,
+                "include_tfidf_only": include_tfidf_only,
+                "results": results,
+            },
+            f, ensure_ascii=False, indent=2,
+        )
+    print(f"\nSaved: {out_path}")
 
     return results
 
 
 def build_argparser():
-    parser = argparse.ArgumentParser(
-        description="Run classical linear models on hybrid vectors."
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
+    parser.add_argument("--class-weight", default=None,
+                        choices=[None, "balanced"], nargs="?")
+    parser.add_argument("--no-tfidf-only", action="store_true",
+                        help="Не запускать TF-IDF-only baseline (MultinomialNB и пр.)")
     return parser
 
 
 def main():
     parser = build_argparser()
     args = parser.parse_args()
-    run_classical(args.vecdir)
+    run_classical(
+        args.vecdir,
+        class_weight=args.class_weight,
+        include_tfidf_only=not args.no_tfidf_only,
+    )
 
 
 if __name__ == "__main__":

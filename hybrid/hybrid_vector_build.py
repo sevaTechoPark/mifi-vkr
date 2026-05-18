@@ -7,6 +7,7 @@ import pandas as pd
 import scipy.sparse as sp
 import torch
 
+from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import StandardScaler, normalize
 from transformers import AutoTokenizer, RobertaModel
@@ -15,13 +16,12 @@ from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 from .config import HybridModelConfig, HybridDataConfig
 
 
-def load_and_clean_df(path, text_col: str = "text", label_col: str = "label", require_labels: bool = True):
+def load_and_clean_df(path, text_col="text", label_col="label", require_labels=True):
     df = pd.read_csv(path)
 
     required_cols = [text_col]
     if require_labels:
         required_cols.append(label_col)
-
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns in {path}: {missing}")
@@ -38,21 +38,21 @@ def load_and_clean_df(path, text_col: str = "text", label_col: str = "label", re
     return df
 
 
-def build_tfidf(X_train, X_test):
+def build_tfidf(X_train, X_test, model_cfg: HybridModelConfig):
     word_tfidf = TfidfVectorizer(
         analyzer="word",
-        ngram_range=(1, 2),
+        ngram_range=(model_cfg.word_ngram_min, model_cfg.word_ngram_max),
         token_pattern=r"(?u)\b\w\w+\b",
         lowercase=True,
-        min_df=2,
-        max_df=0.98,
+        min_df=model_cfg.word_min_df,
+        max_df=model_cfg.word_max_df,
         sublinear_tf=True,
     )
     char_tfidf = TfidfVectorizer(
         analyzer="char_wb",
-        ngram_range=(3, 5),
-        min_df=2,
-        max_df=0.95,
+        ngram_range=(model_cfg.char_ngram_min, model_cfg.char_ngram_max),
+        min_df=model_cfg.char_min_df,
+        max_df=model_cfg.char_max_df,
         lowercase=True,
         sublinear_tf=True,
     )
@@ -66,17 +66,15 @@ def build_tfidf(X_train, X_test):
     X_train_tfidf = sp.hstack([X_train_word, X_train_char]).tocsr()
     X_test_tfidf = sp.hstack([X_test_word, X_test_char]).tocsr()
 
-    # Нормируем TF‑IDF по строкам
     X_train_tfidf = normalize(X_train_tfidf, norm="l2")
     X_test_tfidf = normalize(X_test_tfidf, norm="l2")
 
     return X_train_tfidf, X_test_tfidf, word_tfidf, char_tfidf
 
 
-def build_embedder(model_dir: str = "", model_cfg: HybridModelConfig | None = None) -> LongTextRobertaEmbedder:
+def build_embedder(model_dir="", model_cfg=None):
     if model_cfg is None:
         model_cfg = HybridModelConfig()
-
     return LongTextRobertaEmbedder(
         model_dir=model_dir,
         base_model_name=model_cfg.base_model_name,
@@ -89,25 +87,14 @@ def build_embedder(model_dir: str = "", model_cfg: HybridModelConfig | None = No
     )
 
 
-def document_bert_embeddings_from_model_dir(
-    texts,
-    model_dir: str,
-    model_cfg: HybridModelConfig | None = None,
-) -> np.ndarray:
+def document_bert_embeddings_from_model_dir(texts, model_dir, model_cfg=None):
     embedder = build_embedder(model_dir=model_dir, model_cfg=model_cfg)
     embs = embedder.encode([str(t) for t in texts])
     return embs.astype(np.float32)
 
 
 @torch.no_grad()
-def document_bert_embeddings_base(
-    texts,
-    tokenizer,
-    model,
-    device,
-    batch_size: int = 8,
-    max_length: int = 512,
-) -> np.ndarray:
+def document_bert_embeddings_base(texts, tokenizer, model, device, batch_size=8, max_length=512):
     all_vecs = []
     texts = [str(t) for t in texts]
     model.eval()
@@ -138,13 +125,13 @@ def document_bert_embeddings_base(
 
 
 def run_build(
-    train_file: str,
-    test_file: str,
-    outdir: str,
-    model_dir: str | None = None,
-    device: str = "cpu",
-    model_cfg: HybridModelConfig | None = None,
-    data_cfg: HybridDataConfig | None = None,
+    train_file,
+    test_file,
+    outdir,
+    model_dir=None,
+    device="cpu",
+    model_cfg=None,
+    data_cfg=None,
 ):
     if model_cfg is None:
         model_cfg = HybridModelConfig()
@@ -153,36 +140,30 @@ def run_build(
 
     os.makedirs(outdir, exist_ok=True)
 
-    train_df = load_and_clean_df(
-        train_file,
-        text_col=data_cfg.text_col,
-        label_col=data_cfg.label_col,
-        require_labels=True,
-    )
-    test_df = load_and_clean_df(
-        test_file,
-        text_col=data_cfg.text_col,
-        label_col=data_cfg.label_col,
-        require_labels=True,
-    )
+    train_df = load_and_clean_df(train_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col)
+    test_df = load_and_clean_df(test_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col)
 
     X_train = train_df[data_cfg.text_col]
     y_train = train_df[data_cfg.label_col]
     X_test = test_df[data_cfg.text_col]
     y_test = test_df[data_cfg.label_col]
 
-    X_train_tfidf, X_test_tfidf, word_tfidf, char_tfidf = build_tfidf(X_train, X_test)
+    # Сохраняем сами тексты, чтобы classical-модуль мог поднять TF-IDF-only baseline
+    train_df[[data_cfg.text_col, data_cfg.label_col]].to_csv(
+        os.path.join(outdir, "texts_train.csv"), index=False
+    )
+    test_df[[data_cfg.text_col, data_cfg.label_col]].to_csv(
+        os.path.join(outdir, "texts_test.csv"), index=False
+    )
+
+    X_train_tfidf, X_test_tfidf, word_tfidf, char_tfidf = build_tfidf(X_train, X_test, model_cfg)
 
     if model_dir:
         X_train_bert = document_bert_embeddings_from_model_dir(
-            X_train.tolist(),
-            model_dir=model_dir,
-            model_cfg=model_cfg,
+            X_train.tolist(), model_dir=model_dir, model_cfg=model_cfg
         )
         X_test_bert = document_bert_embeddings_from_model_dir(
-            X_test.tolist(),
-            model_dir=model_dir,
-            model_cfg=model_cfg,
+            X_test.tolist(), model_dir=model_dir, model_cfg=model_cfg
         )
     else:
         torch_device = torch.device(
@@ -192,20 +173,12 @@ def run_build(
         base_model = RobertaModel.from_pretrained(model_cfg.base_model_name).to(torch_device)
 
         X_train_bert = document_bert_embeddings_base(
-            X_train.tolist(),
-            tokenizer,
-            base_model,
-            torch_device,
-            batch_size=model_cfg.batch_size,
-            max_length=model_cfg.max_length,
+            X_train.tolist(), tokenizer, base_model, torch_device,
+            batch_size=model_cfg.batch_size, max_length=model_cfg.max_length,
         )
         X_test_bert = document_bert_embeddings_base(
-            X_test.tolist(),
-            tokenizer,
-            base_model,
-            torch_device,
-            batch_size=model_cfg.batch_size,
-            max_length=model_cfg.max_length,
+            X_test.tolist(), tokenizer, base_model, torch_device,
+            batch_size=model_cfg.batch_size, max_length=model_cfg.max_length,
         )
 
     # StandardScaler по BERT-блоку
@@ -213,27 +186,25 @@ def run_build(
     X_train_bert_scaled = scaler_bert.fit_transform(X_train_bert).astype(np.float32)
     X_test_bert_scaled = scaler_bert.transform(X_test_bert).astype(np.float32)
 
-    # Важно: BERT-блок масштабируется через bert_weight
     X_train_bert_weighted = X_train_bert_scaled * float(model_cfg.bert_weight)
     X_test_bert_weighted = X_test_bert_scaled * float(model_cfg.bert_weight)
 
-    X_train_hybrid = sp.hstack(
-        [
-            X_train_tfidf,
-            sp.csr_matrix(X_train_bert_weighted),
-        ]
-    ).tocsr()
+    X_train_hybrid = sp.hstack([X_train_tfidf, sp.csr_matrix(X_train_bert_weighted)]).tocsr()
+    X_test_hybrid = sp.hstack([X_test_tfidf, sp.csr_matrix(X_test_bert_weighted)]).tocsr()
 
-    X_test_hybrid = sp.hstack(
-        [
-            X_test_tfidf,
-            sp.csr_matrix(X_test_bert_weighted),
-        ]
-    ).tocsr()
-
-    # Финальная L2‑нормировка гибридных векторов
     X_train_hybrid = normalize(X_train_hybrid, norm="l2")
     X_test_hybrid = normalize(X_test_hybrid, norm="l2")
+
+    # Опциональный TruncatedSVD для плотного представления
+    svd = None
+    if model_cfg.svd_components and model_cfg.svd_components > 0:
+        n_comp = min(model_cfg.svd_components, X_train_hybrid.shape[1] - 1, X_train_hybrid.shape[0] - 1)
+        svd = TruncatedSVD(n_components=n_comp, random_state=42)
+        X_train_dense = svd.fit_transform(X_train_hybrid)
+        X_test_dense = svd.transform(X_test_hybrid)
+        np.save(os.path.join(outdir, "X_train_dense.npy"), X_train_dense.astype(np.float32))
+        np.save(os.path.join(outdir, "X_test_dense.npy"), X_test_dense.astype(np.float32))
+        joblib.dump(svd, os.path.join(outdir, "svd.joblib"))
 
     sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid)
     sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid)
@@ -244,20 +215,6 @@ def run_build(
     joblib.dump(char_tfidf, os.path.join(outdir, "char_tfidf.joblib"))
     joblib.dump(scaler_bert, os.path.join(outdir, "scaler_bert.joblib"))
 
-    # Немного диагностик по нормам (можно смотреть глазами)
-    train_tfidf_norm_mean = float(
-        np.mean(np.linalg.norm(X_train_tfidf.toarray(), axis=1))
-    ) if X_train_tfidf.shape[0] > 0 else 0.0
-    train_bert_norm_mean = float(
-        np.mean(np.linalg.norm(X_train_bert_scaled, axis=1))
-    ) if X_train_bert_scaled.shape[0] > 0 else 0.0
-    train_bert_weighted_norm_mean = float(
-        np.mean(np.linalg.norm(X_train_bert_weighted, axis=1))
-    ) if X_train_bert_weighted.shape[0] > 0 else 0.0
-
-    # Доля BERT-энергии в гибридных векторах (на train, до финальной нормировки).
-    # Это и есть «эффективный bert_weight» — единственная величина, которая
-    # реально влияет на cos-similarity после нормировки.
     if X_train_tfidf.shape[0] > 0:
         tfidf_sq = np.asarray(X_train_tfidf.multiply(X_train_tfidf).sum(axis=1)).ravel()
         bert_sq = np.linalg.norm(X_train_bert_weighted, axis=1) ** 2
@@ -278,11 +235,11 @@ def run_build(
         "chunk_aggregation": model_cfg.chunk_aggregation,
         "bert_batch_size": model_cfg.batch_size,
         "bert_weight": float(model_cfg.bert_weight),
-        "train_shape": X_train_hybrid.shape,
-        "test_shape": X_test_hybrid.shape,
-        "train_tfidf_norm_mean": train_tfidf_norm_mean,
-        "train_bert_norm_mean": train_bert_norm_mean,
-        "train_bert_weighted_norm_mean": train_bert_weighted_norm_mean,
+        "svd_components": int(model_cfg.svd_components),
+        "train_shape": list(X_train_hybrid.shape),
+        "test_shape": list(X_test_hybrid.shape),
+        "tfidf_dim": int(X_train_tfidf.shape[1]),
+        "bert_dim": int(X_train_bert_scaled.shape[1]),
         "bert_share_mean": bert_share_mean,
     }
     with open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8") as f:
@@ -296,3 +253,13 @@ def run_build(
         "X_test_shape": tuple(X_test_hybrid.shape),
         "meta": meta,
     }
+
+
+def build_argparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", required=True)
+    parser.add_argument("--test", required=True)
+    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--model-dir", default=None)
+    parser.add_argument("--device", default=None)
+    return parser

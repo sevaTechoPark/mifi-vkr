@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import argparse
 import gc
 import json
@@ -68,13 +69,25 @@ def build_sentence_transformer(
         max_seq_length=max_length,
         model_kwargs={"torch_dtype": "float32"},
     )
+
     pooling = pooling.lower().strip()
-    pooling_model = models.Pooling(
-        transformer.get_word_embedding_dimension(),
-        pooling_mode_mean_tokens=(pooling == "mean"),
-        pooling_mode_max_tokens=(pooling == "max"),
-        pooling_mode_cls_token=(pooling == "cls"),
-    )
+    # Новый API sentence-transformers: pooling_mode как строка.
+    # Если установлена старая версия — fallback на старый kwargs-API.
+    try:
+        pooling_model = models.Pooling(
+            transformer.get_embedding_dimension()
+            if hasattr(transformer, "get_embedding_dimension")
+            else transformer.get_word_embedding_dimension(),
+            pooling_mode=pooling,  # "mean" | "max" | "cls"
+        )
+    except TypeError:
+        pooling_model = models.Pooling(
+            transformer.get_word_embedding_dimension(),
+            pooling_mode_mean_tokens=(pooling == "mean"),
+            pooling_mode_max_tokens=(pooling == "max"),
+            pooling_mode_cls_token=(pooling == "cls"),
+        )
+
     normalize = models.Normalize()
     return SentenceTransformer(modules=[transformer, pooling_model, normalize])
 
@@ -233,7 +246,11 @@ def run_from_params(
     metrics_path = output_dir / "metrics.json"
     best_model_dir = output_dir / "best_model"
     resume_ckpt_path = output_dir / "resume_checkpoint.pt"
-    trainer_tmp_dir = output_dir / "_trainer_tmp"
+    # ВАЖНО: _trainer_tmp пишем в системный tmp (а не на Drive!), потому что
+    # за время обучения Trainer кладёт туда полные чекпоинты модели (~1.4 GB
+    # для ruRoberta-large), и Drive забивается за 2-3 эпохи.
+    trainer_tmp_dir = Path(tempfile.mkdtemp(prefix="st_trainer_tmp_"))
+    print(f"[bert_embeddings] Trainer tmp dir: {trainer_tmp_dir}")
 
     raw_df, exploded_df, pair_df, train_ds, valid_ds = build_train_and_eval_pairs(
         cfg, train_file, test_file

@@ -22,8 +22,13 @@ from .data import (
 )
 from .metrics import compute_metrics
 from .model import build_model, ChunkDataCollator
-from .utils import ensure_dir, get_filtered_model_state_dict, set_global_seed, cleanup_memory
-
+from .utils import (
+    ensure_dir,
+    get_filtered_model_state_dict,
+    load_state_dict_into_model,
+    set_global_seed,
+    cleanup_memory,
+)
 
 # =============================================================================
 # Утилиты
@@ -392,9 +397,11 @@ def run_training_pipeline(
 
     trainer.train()
 
-    # Восстанавливаем лучший state_dict В ПАМЯТЬ перед финальным evaluate
+    # Восстанавливаем лучший state_dict В ПАМЯТЬ перед финальным evaluate.
+    # strict=False обязательно: в модели есть buffer `class_weights`,
+    # а в сохранённом state_dict его нет (отфильтрован сознательно).
     if best_callback.best_state_dict is not None:
-        trainer.model.load_state_dict(best_callback.best_state_dict, strict=True)
+        load_state_dict_into_model(trainer.model, best_callback.best_state_dict)
 
     eval_metrics = trainer.evaluate(dataset["validation"])
 

@@ -141,7 +141,8 @@ python -m bert_classification.main \
 python -m hybrid.main build \
   --train ~/papadyk-vkr/data/train.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --output-dir ~/papadyk-vkr/data/hybrid_vec
+  --output-dir ~/papadyk-vkr/data/hybrid_vec \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
 
 python -m hybrid.main classical \
   --vecdir ~/papadyk-vkr/data/hybrid_vec
@@ -153,12 +154,14 @@ python -m hybrid.main mlp \
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --method centroid
+  --method centroid \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
 
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --method nearest
+  --method nearest \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
 
 -------
 
@@ -166,7 +169,8 @@ python -m cosine_similarity_classification.main \
 python -m hybrid.main build \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --output-dir ~/papadyk-vkr/data/hybrid_vec
+  --output-dir ~/papadyk-vkr/data/hybrid_vec \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
 
 python -m hybrid.main classical \
   --vecdir ~/papadyk-vkr/data/hybrid_vec
@@ -178,9 +182,11 @@ python -m hybrid.main mlp \
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --method centroid
+  --method centroid \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
 
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --method nearest
+  --method nearest \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out

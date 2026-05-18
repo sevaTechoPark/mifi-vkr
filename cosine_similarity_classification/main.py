@@ -154,13 +154,11 @@ def run_from_params(
     if test_has_labels:
         y_true = test_df[label_col].astype(str).values
         eval_metrics = evaluate_predictions(y_true, pred_labels)
-        metrics["balanced_accuracy"] = float(eval_metrics["balanced_accuracy"])
-        metrics["macro_f1"] = float(eval_metrics["macro_f1"])
-        metrics["classification_report"] = eval_metrics["classification_report"]
+        metrics["balanced_accuracy"] = eval_metrics["balanced_accuracy"]
+        metrics["macro_f1"] = eval_metrics["macro_f1"]
     else:
         metrics["balanced_accuracy"] = None
         metrics["macro_f1"] = None
-        metrics["classification_report"] = None
 
     components = {
         "method": method,
@@ -176,12 +174,13 @@ def run_from_params(
     print(f"[INFO] Using device: {device}")
 
     if test_has_labels:
-        print(f"balanced_accuracy: {metrics['balanced_accuracy']:.6f}")
-        print(f"macro_f1: {metrics['macro_f1']:.6f}")
-        print()
-        print(metrics["classification_report"])
+        print(
+            f"{method}: "
+            f"{{'balanced_accuracy': {metrics['balanced_accuracy']:.6f}, "
+            f"'macro_f1': {metrics['macro_f1']:.6f}}}"
+        )
     else:
-        print("Test file has no label column; predictions were computed without evaluation metrics.")
+        print(f"{method}: predictions computed (test has no labels).")
 
     return components, metrics
 
@@ -242,8 +241,6 @@ def main():
     print()
     print("run_summary:")
     for key, value in metrics.items():
-        if key == "classification_report":
-            continue
         print(f"{key}: {value}")
 
 

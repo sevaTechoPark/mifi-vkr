@@ -1,5 +1,7 @@
 import argparse
 from pathlib import Path
+import logging
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 import pandas as pd
 import torch
@@ -17,6 +19,7 @@ from cosine_similarity_classification.config import (
     CHUNK_AGGREGATION,
     BATCH_SIZE,
     DEVICE,
+    KNN_K,
 )
 from cosine_similarity_classification.embedder import (
     load_texts_and_labels,
@@ -63,6 +66,7 @@ def run_from_params(
     chunk_aggregation=CHUNK_AGGREGATION,
     batch_size=BATCH_SIZE,
     device=DEVICE,
+    knn_k: int = KNN_K,
 ):
     train_file = str(Path(train_file).expanduser())
     test_file = str(Path(test_file).expanduser())
@@ -116,8 +120,9 @@ def run_from_params(
             train_embs=train_embs,
             train_labels=train_labels,
             query_embs=test_embs,
+            k=knn_k,
         )
-        extra = {}
+        extra = {"knn_k": int(min(knn_k, len(train_df)))}
     elif method == "centroid":
         pred_labels, pred_scores, classes, centroids = predict_centroid(
             train_embs=train_embs,
@@ -205,6 +210,7 @@ def build_argparser():
     parser.add_argument("--pooling", type=str, choices=["mean", "cls", "max", "mean_max"], default=POOLING)
     parser.add_argument("--chunk-aggregation", type=str, choices=["mean", "max", "mean_max"], default=CHUNK_AGGREGATION)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--knn-k", type=int, default=KNN_K, help="k для метода 'nearest' (kNN cosine, weights=distance)")
 
     return parser
 
@@ -212,6 +218,8 @@ def build_argparser():
 def main():
     parser = build_argparser()
     args = parser.parse_args()
+
+    print(f"[ARGS] {vars(args)}")   # видно сразу, не съел ли shell какой-нибудь --model-dir
 
     _, metrics = run_from_params(
         train_file=args.train,
@@ -228,6 +236,7 @@ def main():
         chunk_aggregation=args.chunk_aggregation,
         batch_size=args.batch_size,
         device=args.device,
+        knn_k=args.knn_k,
     )
 
     print()

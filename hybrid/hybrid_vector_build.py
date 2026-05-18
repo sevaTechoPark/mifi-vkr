@@ -255,6 +255,17 @@ def run_build(
         np.mean(np.linalg.norm(X_train_bert_weighted, axis=1))
     ) if X_train_bert_weighted.shape[0] > 0 else 0.0
 
+    # Доля BERT-энергии в гибридных векторах (на train, до финальной нормировки).
+    # Это и есть «эффективный bert_weight» — единственная величина, которая
+    # реально влияет на cos-similarity после нормировки.
+    if X_train_tfidf.shape[0] > 0:
+        tfidf_sq = np.asarray(X_train_tfidf.multiply(X_train_tfidf).sum(axis=1)).ravel()
+        bert_sq = np.linalg.norm(X_train_bert_weighted, axis=1) ** 2
+        denom = tfidf_sq + bert_sq + 1e-12
+        bert_share_mean = float(np.mean(bert_sq / denom))
+    else:
+        bert_share_mean = 0.0
+
     meta = {
         "base_model_name": model_cfg.base_model_name,
         "model_dir": model_dir,
@@ -272,6 +283,7 @@ def run_build(
         "train_tfidf_norm_mean": train_tfidf_norm_mean,
         "train_bert_norm_mean": train_bert_norm_mean,
         "train_bert_weighted_norm_mean": train_bert_weighted_norm_mean,
+        "bert_share_mean": bert_share_mean,
     }
     with open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

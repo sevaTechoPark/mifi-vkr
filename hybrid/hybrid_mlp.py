@@ -21,9 +21,9 @@ LR = 1e-4
 PATIENCE = 10
 WEIGHT_DECAY = 1e-2
 
-HIDDEN_DIM = 1024
-NUM_BLOCKS = 3
-DROPOUT = 0.25
+HIDDEN_DIM = 512
+NUM_BLOCKS = 2
+DROPOUT = 0.35
 
 FOCAL_GAMMA = 1.5
 LABEL_SMOOTHING = 0.03
@@ -166,7 +166,13 @@ def run_mlp(vecdir, epochs=25, device="cpu"):
     train_ds = DenseDataset(X_train, y_train_enc)
     test_ds = DenseDataset(X_test, y_test_enc)
 
-    device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
+    if isinstance(device, str):
+        device = device.strip().lower()
+    if device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+    if device == "mps" and not torch.backends.mps.is_available():
+        device = "cpu"
+    device = torch.device(device)
     use_cuda = (device.type == "cuda")
     pin = bool(use_cuda)
 
@@ -200,11 +206,10 @@ def run_mlp(vecdir, epochs=25, device="cpu"):
         weight_decay=WEIGHT_DECAY
     )
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_0=10,
-        T_mult=2,
-        eta_min=1e-5
+        T_max=epochs,
+        eta_min=1e-5,
     )
 
     best_f1 = -1.0

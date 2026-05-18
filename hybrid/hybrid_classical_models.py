@@ -56,12 +56,14 @@ def run_classical(vecdir: str):
         "linear_svc": LinearSVC(
             class_weight="balanced",
             max_iter=10000,
-            dual=False,  # если n_samples > n_features; убери/измени при необходимости
+            dual=False,
+            random_state=42,
         ),
         "logreg": LogisticRegression(
             class_weight="balanced",
             max_iter=2000,
             n_jobs=-1,
+            random_state=42,
         ),
     }
 

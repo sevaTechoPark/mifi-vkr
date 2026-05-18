@@ -187,12 +187,38 @@ cosine_similarity nearest balanced_accuracy: 0.256835, macro_f1: 0.248612
 hybrid MLP {'balanced_accuracy': 0.32134, 'macro_f1': 0.350215}
 hybrid classical linear_svc: {'balanced_accuracy': 0.341969, 'macro_f1': 0.314718}
 hybrid classical logreg: {'balanced_accuracy': 0.274202, 'macro_f1': 0.196601}
-[custom_embeder] cosine_similarity centroid 
-[custom_embeder] cosine_similarity nearest 
-[custom_embeder] hybrid MLP 
-[custom_embeder] hybrid classical linear_svc: 
-[custom_embeder] hybrid classical logreg: 
+[custom_embeder] cosine_similarity centroid balanced_accuracy: 0.030824, macro_f1: 0.009659
+[custom_embeder] cosine_similarity nearest balanced_accuracy: 0.019605, macro_f1: 0.014447
+[custom_embeder] hybrid MLP {'balanced_accuracy': 0.117298, 'macro_f1': 0.083965}
+[custom_embeder] hybrid classical linear_svc: {'balanced_accuracy': 0.035771, 'macro_f1': 0.029661}
+[custom_embeder] hybrid classical logreg: {'balanced_accuracy': 0.047264, 'macro_f1': 0.01863}
 bert-classification balanced_accuracy: balanced_accuracy: 0.420833, f1_macro: 0.393838
 
 
+train_augmented.csv
+BASELINE METRICS: {'balanced_accuracy': 0.489, 'macro_f1': 0.486}
 
+Нет, это не означает, что аугментация плоха. Это абсолютно нормальное и ожидаемое поведение, и вот почему:
+
+## Почему метрики упали относительно чистого train
+
+**Текущий чистый train** (0.534 / 0.543) — это уже отфильтрованный, высококачественный набор. После удаления low-content документов TF-IDF получил очень «концентрированный» сигнал: каждый документ несёт реальную смысловую нагрузку. Модель обучается на плотном, чистом пространстве признаков.
+
+**После аугментации** (0.489 / 0.486) — ты добавляешь синтетические примеры, которые по определению хуже оригиналов:
+- Перефразирование и обратный перевод добавляют лексическую вариативность, но также вносят **«размытие» границ классов** в TF-IDF пространстве.
+- Синтетические тексты занимают «промежуточное» пространство между классами, что мешает линейному классификатору (LinearSVC) строить чёткие гиперплоскости.
+
+## Почему аугментация раньше помогала
+
+На **старом грязном train** (до нашей очистки) аугментация давала прирост 0.45 → 0.451 — то есть почти не помогала. Но там оригинальный train был перегружен мусорными документами, поэтому любое добавление примеров давало мизерный эффект.
+
+Сейчас после очистки **чистый train стал сильнее аугментированного** — это говорит о том, что качество аугментации не успевает за качеством очистки.
+
+## Что это значит на практике
+
+Аугментация полезна **именно для BERT-моделей**, а не для TF-IDF:
+
+| Модель | Почему аугментация помогает/мешает |
+|---|---|
+| TF-IDF + LinearSVC | Страдает от лексического размытия; чистый сигнал важнее объёма |
+| BERT / ruRoberta | Выигрывает от разнообразия формулировок; контекстные эмбеддинги устойчивее к синтетическому шуму |

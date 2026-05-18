@@ -54,6 +54,17 @@ python -m text_summarization.main \
 
 Можно выполнять классификации по каждому из этих файлов. Метрики выводятся в stdout их надо самому куда-то сохранять.
 
+# Fine-tuned BERT для построение embeddings
+
+mkdir -p ~/papadyk-vkr/bert-embeddings-out
+
+```
+python -m bert_embeddings.main \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/bert-embeddings-out
+  ```
+
 # Классификация
 
 ## I baseline
@@ -72,6 +83,7 @@ python baseline.py \
 python -m hybrid.main build \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --output-dir ~/papadyk-vkr/data/hybrid_vec
 ```
 
@@ -98,6 +110,7 @@ python -m hybrid.main mlp \
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --method centroid
 ```
 
@@ -105,6 +118,7 @@ python -m cosine_similarity_classification.main \
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --method nearest
 ```
 

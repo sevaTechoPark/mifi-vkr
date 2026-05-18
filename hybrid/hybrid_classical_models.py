@@ -53,9 +53,18 @@ def run_classical(
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
 
+    # Подсчёт распределения для безопасного CV
+    class_counts = y_train.value_counts()
+    min_class_count = int(class_counts.min())
+    num_classes = int(class_counts.shape[0])
+
     results: list = []
 
     print(f"--- hybrid (TF-IDF + BERT) | class_weight={class_weight!r} ---")
+    print(
+        f"y_train: {len(y_train)} объектов, {num_classes} классов, "
+        f"мин. класс = {min_class_count} пример(а/ов)"
+    )
 
     base_kwargs = {"random_state": 42}
     if class_weight is not None:
@@ -67,14 +76,34 @@ def run_classical(
         X_train, y_train, X_test, y_test, results,
     )
 
-    _fit_eval(
-        "linear_svc_calibrated",
-        CalibratedClassifierCV(
-            LinearSVC(max_iter=10000, dual=False, **base_kwargs),
-            method="sigmoid", cv=3,
-        ),
-        X_train, y_train, X_test, y_test, results,
-    )
+    # Калиброванный SVC требует, чтобы в каждом фолде stratified CV было ≥1 пример каждого класса.
+    # Стратификация делит min_class_count на cv фолдов и хочет ≥1 на фолд, т.е. cv ≤ min_class_count.
+    # Берём максимум 3, но не больше min_class_count, и не меньше 2.
+    if min_class_count >= 2:
+        safe_cv = max(2, min(3, min_class_count))
+        _fit_eval(
+            "linear_svc_calibrated",
+            CalibratedClassifierCV(
+                LinearSVC(max_iter=10000, dual=False, **base_kwargs),
+                method="sigmoid", cv=safe_cv,
+            ),
+            X_train, y_train, X_test, y_test, results,
+        )
+        if safe_cv < 3:
+            print(f"  (linear_svc_calibrated использовал cv={safe_cv}, потому что мин. класс = {min_class_count})")
+    else:
+        rare_classes = class_counts[class_counts < 2].index.tolist()
+        print(
+            f"linear_svc_calibrated: SKIPPED — есть классы с одним примером "
+            f"(нужно ≥2 для калибровки). Редкие: {rare_classes[:5]}"
+            f"{'...' if len(rare_classes) > 5 else ''}"
+        )
+        results.append({
+            "model": "linear_svc_calibrated",
+            "balanced_accuracy": None,
+            "macro_f1": None,
+            "skipped_reason": f"min_class_count={min_class_count} < 2",
+        })
 
     _fit_eval(
         "logreg",
@@ -124,12 +153,13 @@ def run_classical(
             {
                 "class_weight": class_weight,
                 "include_tfidf_only": include_tfidf_only,
+                "min_class_count": min_class_count,
+                "num_classes": num_classes,
                 "results": results,
             },
             f, ensure_ascii=False, indent=2,
         )
     print(f"\nSaved: {out_path}")
-
     return results
 
 

@@ -33,3 +33,24 @@ class HybridPathConfig:
     train_file: str = ""
     test_file: str = ""
     output_dir: str = ""
+
+@dataclass
+class HybridMLPConfig:
+    # Воспроизводимость
+    seed: int = 234
+
+    # Обучение
+    batch_size: int = 128
+    learning_rate: float = 1e-4
+    patience: int = 10
+    weight_decay: float = 1e-2
+    epochs: int = 25  # дефолт для run_mlp; раньше задавался отдельным CLI-флагом
+
+    # Архитектура
+    hidden_dim: int = 512
+    num_blocks: int = 2
+    dropout: float = 0.35
+
+    # Лосс
+    focal_gamma: float = 1.5
+    label_smoothing: float = 0.03

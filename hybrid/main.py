@@ -109,8 +109,20 @@ def build_parser():
 
     mlp_parser = subparsers.add_parser("mlp", help="Run MLP on hybrid vectors")
     mlp_parser.add_argument("--vecdir", required=True)
-    mlp_parser.add_argument("--epochs", type=int, default=25)
+    mlp_parser.add_argument("--epochs", type=int, default=None)
     mlp_parser.add_argument("--device", default=None)
+
+    # MLP-гиперпараметры (если не задавать — берутся из HybridMLPConfig)
+    mlp_parser.add_argument("--seed", type=int, default=None)
+    mlp_parser.add_argument("--batch-size", type=int, default=None)
+    mlp_parser.add_argument("--learning-rate", type=float, default=None)
+    mlp_parser.add_argument("--patience", type=int, default=None)
+    mlp_parser.add_argument("--weight-decay", type=float, default=None)
+    mlp_parser.add_argument("--hidden-dim", type=int, default=None)
+    mlp_parser.add_argument("--num-blocks", type=int, default=None)
+    mlp_parser.add_argument("--dropout", type=float, default=None)
+    mlp_parser.add_argument("--focal-gamma", type=float, default=None)
+    mlp_parser.add_argument("--label-smoothing", type=float, default=None)
 
     return parser
 
@@ -139,7 +151,10 @@ def main():
         device = _detect_device(args.device)
         print(f"[INFO] Using device: {device}")
 
-        run_mlp(args.vecdir, epochs=args.epochs, device=device)
+        from .hybrid_mlp import _cfg_from_args
+        cfg = _cfg_from_args(args)
+
+        run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device)
     else:
         raise ValueError(f"Unknown command: {args.command}")
 

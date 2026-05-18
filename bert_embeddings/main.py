@@ -192,6 +192,7 @@ def run_from_params(
 
     train_loss = cfg.train_loss.lower().strip()
 
+    
     if train_loss == "cosent":
         loss = losses.CoSENTLoss(model)
         train_ds = train_ds.remove_columns(["label"])

@@ -1,12 +1,13 @@
 import argparse
 from dataclasses import fields, replace
+import logging
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 import numpy as np
 import pandas as pd
 
 from bert_embeddings.config import EmbeddingConfig
 from bert_embeddings.embedding_model import LongTextRobertaEmbedder
-
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(

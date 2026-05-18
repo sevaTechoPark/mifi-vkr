@@ -24,18 +24,23 @@ def load_labeled_text_csv(
 
 def build_training_dataframe(
     train_path: str,
-    test_path: str,
+    test_path: str | None = None,
     text_col: str = "text",
     label_col: str = "label",
 ) -> pd.DataFrame:
-    train_df = load_labeled_text_csv(train_path, text_col=text_col, label_col=label_col)
-    test_df = load_labeled_text_csv(test_path, text_col=text_col, label_col=label_col)
-    df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
-    df = df[[text_col, label_col]].dropna().copy()
-    df[text_col] = df[text_col].astype(str).str.strip()
-    df = df[df[text_col] != ""].reset_index(drop=True)
-    df[label_col] = df[label_col].astype(str)
-    return df
+    """
+    Готовит train-датасет для обучения энкодера БЕЗ test-данных.
+    test_path принимается ради обратной совместимости и игнорируется при формировании df.
+
+    Если test_path передан — печатается предупреждение, и тестовая выборка НЕ подмешивается
+    в обучающую (иначе энкодер «увидит» тест и downstream-классификаторы получат утечку).
+    """
+    if test_path is not None:
+        print(
+            "[bert_embeddings] build_training_dataframe: test_path передан, "
+            "но НЕ используется для обучения энкодера (защита от утечки train↔test)."
+        )
+    return load_labeled_text_csv(train_path, text_col=text_col, label_col=label_col)
 
 
 def save_texts_parquet(df: pd.DataFrame, out_path: str):
@@ -170,6 +175,7 @@ def build_pair_dataframe(
     max_pairs_per_label: int = 20000,
     max_negative_pairs: int = 20000,
     seed: int = 42,
+    balance_positives: bool = True,
 ) -> pd.DataFrame:
     rng = random.Random(seed)
 
@@ -178,8 +184,25 @@ def build_pair_dataframe(
         grouped[row[label_col]].append(row[text_col])
 
     pairs = []
+
+    if balance_positives:
+        # лимит на класс = min(глобальный лимит, медиана числа возможных пар по классам).
+        # Это снимает перекос в сторону крупных классов: миноры не «тонут».
+        per_class_caps = []
+        for texts in grouped.values():
+            n = len(texts)
+            possible = n * (n - 1) // 2
+            per_class_caps.append(min(max_pairs_per_label, possible))
+        if per_class_caps:
+            median_cap = sorted(per_class_caps)[len(per_class_caps) // 2]
+            effective_cap = max(1, median_cap)
+        else:
+            effective_cap = max_pairs_per_label
+    else:
+        effective_cap = max_pairs_per_label
+
     for _, texts in grouped.items():
-        pairs.extend(_sample_positive_pairs(texts, max_pairs=max_pairs_per_label, rng=rng))
+        pairs.extend(_sample_positive_pairs(texts, max_pairs=effective_cap, rng=rng))
     pairs.extend(_sample_negative_pairs(grouped, max_pairs=max_negative_pairs, rng=rng))
 
     pair_df = pd.DataFrame(pairs, columns=["sentence1", "sentence2", "score", "label"])

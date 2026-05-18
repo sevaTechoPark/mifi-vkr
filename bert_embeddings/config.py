@@ -31,7 +31,7 @@ class MLMConfig:
     max_eval_pairs_per_label: int = 4000
 
     train_pair_strategy: str = "pair_class"   # pair_class | pair_score
-    train_loss: str = "softmax"               # softmax | cosent
+    train_loss: str = "mnr"                   # softmax | cosent | mnr
 
     train_chunk_size: int = 448
     train_chunk_overlap: int = 128

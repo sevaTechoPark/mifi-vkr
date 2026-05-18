@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 import numpy as np
 import torch
@@ -44,11 +46,11 @@ class LongTextRobertaEmbedder:
         if cfg is None:
             cfg = EmbeddingConfig()
 
-        self.base_model_name = base_model_name or cfg.base_model_name
-        self.max_length = max_length or cfg.max_length
-        self.pooling = pooling or cfg.pooling
-        self.chunk_aggregation = chunk_aggregation or cfg.chunk_aggregation
-        self.batch_size = batch_size or cfg.batch_size
+        self.base_model_name = base_model_name if base_model_name is not None else cfg.base_model_name
+        self.max_length = max_length if max_length is not None else cfg.max_length
+        self.pooling = pooling if pooling is not None else cfg.pooling
+        self.chunk_aggregation = chunk_aggregation if chunk_aggregation is not None else cfg.chunk_aggregation
+        self.batch_size = batch_size if batch_size is not None else cfg.batch_size
         self.normalize_chunks = (
             normalize_chunks if normalize_chunks is not None else cfg.normalize_chunks
         )
@@ -59,8 +61,8 @@ class LongTextRobertaEmbedder:
             add_global_chunk if add_global_chunk is not None else cfg.add_global_chunk
         )
 
-        raw_chunk_size = chunk_size or cfg.chunk_size
-        raw_chunk_overlap = chunk_overlap or cfg.chunk_overlap
+        raw_chunk_size = chunk_size if chunk_size is not None else cfg.chunk_size
+        raw_chunk_overlap = chunk_overlap if chunk_overlap is not None else cfg.chunk_overlap
         self.chunk_size = min(raw_chunk_size, self.max_length - 2)
         self.chunk_overlap = min(raw_chunk_overlap, max(0, self.chunk_size // 2))
 

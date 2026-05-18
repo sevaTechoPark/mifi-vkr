@@ -7,6 +7,8 @@ import random
 import shutil
 from dataclasses import fields, replace
 from pathlib import Path
+import logging
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 import numpy as np
 import torch
@@ -31,11 +33,15 @@ from bert_embeddings.data_utils import (
     explode_long_texts_for_training,
 )
 
-
 def cleanup_memory():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    elif torch.backends.mps.is_available():
+        try:
+            torch.mps.empty_cache()
+        except Exception:
+            pass
 
 
 def set_seed(seed: int):
@@ -44,7 +50,11 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
+    if torch.backends.mps.is_available():
+        try:
+            torch.mps.manual_seed(seed)
+        except Exception:
+            pass
 
 def build_sentence_transformer(
     model_name: str,
@@ -101,7 +111,7 @@ def save_encoder_only_from_sentence_transformer(
 def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
     raw_df = build_training_dataframe(
         train_file,
-        test_file,
+        test_path=None, # явно отключаем подмешивание теста
         text_col=cfg.text_col,
         label_col=cfg.label_col,
     )
@@ -195,6 +205,33 @@ def run_from_params(
         )
         metric_for_best_model = "eval_valid-sim_spearman_cosine"
         greater_is_better = True
+
+    elif train_loss == "mnr":
+        # MultipleNegativesRankingLoss: учим энкодер так, чтобы похожие пары были близко,
+        # а все остальные пары в батче — далеко. Это сильнее, чем SoftmaxLoss,
+        # и устойчиво к шуму в negatives.
+        # Нужны ТОЛЬКО позитивные пары (label == 1).
+        pos_mask_train = [int(x) == 1 for x in train_ds["label"]]
+        pos_mask_valid = [int(x) == 1 for x in valid_ds["label"]]
+
+        train_ds = train_ds.select([i for i, m in enumerate(pos_mask_train) if m])
+        valid_ds_for_trainer = valid_ds.select(
+            [i for i, m in enumerate(pos_mask_valid) if m]
+        )
+        train_ds = train_ds.remove_columns(["score", "label"])
+        valid_ds_for_trainer = valid_ds_for_trainer.remove_columns(["score", "label"])
+
+        loss = losses.MultipleNegativesRankingLoss(model)
+
+        evaluator = BinaryClassificationEvaluator(
+            sentences1=valid_ds["sentence1"],
+            sentences2=valid_ds["sentence2"],
+            labels=[int(x) for x in valid_ds["label"]],
+            name="valid-binary",
+        )
+        metric_for_best_model = "eval_valid-binary_cosine_ap"
+        greater_is_better = True
+
     else:
         loss = losses.SoftmaxLoss(
             model=model,

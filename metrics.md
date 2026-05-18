@@ -192,11 +192,30 @@ hybrid classical logreg: {'balanced_accuracy': 0.274202, 'macro_f1': 0.196601}
 [custom_embeder] hybrid MLP {'balanced_accuracy': 0.117298, 'macro_f1': 0.083965}
 [custom_embeder] hybrid classical linear_svc: {'balanced_accuracy': 0.035771, 'macro_f1': 0.029661}
 [custom_embeder] hybrid classical logreg: {'balanced_accuracy': 0.047264, 'macro_f1': 0.01863}
-bert-classification balanced_accuracy: balanced_accuracy: 0.420833, f1_macro: 0.393838
+rubert-base-cased AutoModelForSequenceClassification balanced_accuracy: 0.359116, f1_macro: 0.347114
+rubert-base-cased MeanPooling balanced_accuracy: 0.406195, f1_macro: 0.408135
+ruRoberta-large AutoModelForSequenceClassification balanced_accuracy: 0.388449, f1_macro: 0.376954
+ruRoberta-large MeanPooling balanced_accuracy: 0.396386, f1_macro: 0.394374
+ruRoberta-large chunkmean balanced_accuracy: balanced_accuracy: 0.420833, f1_macro: 0.393838
 
 
 train_augmented.csv
 BASELINE METRICS: {'balanced_accuracy': 0.489, 'macro_f1': 0.486}
+cosine_similarity centroid balanced_accuracy: 0.127799, macro_f1: 0.124524
+cosine_similarity nearest balanced_accuracy: 0.228259, macro_f1: 0.231750
+hybrid MLP {'balanced_accuracy': 0.317409, 'macro_f1': 0.247952}
+hybrid classical linear_svc: {'balanced_accuracy': 0.394114, 'macro_f1': 0.358195}
+hybrid classical logreg: {'balanced_accuracy': 0.272463, 'macro_f1': 0.232159}
+[custom_embeder] cosine_similarity centroid
+[custom_embeder] cosine_similarity nearest
+[custom_embeder] hybrid MLP
+[custom_embeder] hybrid classical
+[custom_embeder] hybrid classical
+rubert-base-cased AutoModelForSequenceClassification balanced_accuracy: 0.432780, f1_macro: 0.431439
+rubert-base-cased MeanPooling balanced_accuracy: 0.453594, f1_macro: 0.447740
+ruRoberta-large AutoModelForSequenceClassification balanced_accuracy: 0.506839, f1_macro: 0.487621
+ruRoberta-large MeanPooling balanced_accuracy: 0.479098, f1_macro: 0.469369
+ruRoberta-large chunkmean
 
 Нет, это не означает, что аугментация плоха. Это абсолютно нормальное и ожидаемое поведение, и вот почему:
 

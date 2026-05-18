@@ -32,6 +32,19 @@ class ChunkDataCollator:
 
 
 class ChunkMeanPoolRobertaClassifier(nn.Module):
+    """
+    Архитектура:
+      RoBERTa → token mean-pool (по каждому чанку) → chunk mean-pool (по чанкам)
+              → LayerNorm → Dropout → Linear(num_labels).
+
+    Изменения относительно прошлой версии:
+      - голова упрощена: была Dropout→Linear→GELU→Dropout→LayerNorm→Linear,
+        стала LayerNorm→Dropout→Linear. Для small-data классификации
+        переусложнённая голова мешает достичь хорошего качества.
+      - gradient_checkpointing включается через TrainingArguments(...), а НЕ
+        внутри __init__ — это убирает конфликты с recent HF Trainer.
+    """
+
     def __init__(
         self,
         model_cfg: ModelConfig,
@@ -50,18 +63,13 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
             label2id=label2id,
             output_hidden_states=False,
         )
-
         self.roberta = RobertaModel.from_pretrained(model_cfg.model_name, config=self.config)
-        self.roberta.gradient_checkpointing_enable()
+        # use_cache=False обязательно при gradient_checkpointing
         self.roberta.config.use_cache = False
 
         hidden_size = self.config.hidden_size
-
-        self.dropout1 = nn.Dropout(model_cfg.head_dropout)
-        self.fc1 = nn.Linear(hidden_size, hidden_size)
-        self.act = nn.GELU()
-        self.dropout2 = nn.Dropout(model_cfg.head_dropout)
-        self.norm = nn.LayerNorm(hidden_size)
+        self.head_norm = nn.LayerNorm(hidden_size)
+        self.head_dropout = nn.Dropout(model_cfg.head_dropout)
         self.classifier = nn.Linear(hidden_size, num_labels)
 
         if class_weights is not None:
@@ -85,7 +93,6 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, labels=None, num_chunks=None, **kwargs):
         batch_size, n_chunks, seq_len = input_ids.shape
-
         flat_input_ids = input_ids.view(batch_size * n_chunks, seq_len)
         flat_attention_mask = attention_mask.view(batch_size * n_chunks, seq_len)
 
@@ -106,11 +113,8 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
 
         doc_embedding = self.chunk_mean_pool(chunk_embeddings, chunk_mask)
 
-        x = self.dropout1(doc_embedding)
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.norm(x)
-        x = self.dropout2(x)
+        x = self.head_norm(doc_embedding)
+        x = self.head_dropout(x)
         logits = self.classifier(x)
 
         loss = None
@@ -122,6 +126,13 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
             loss = loss_fct(logits.view(-1, self.config.num_labels), labels.view(-1))
 
         return {"loss": loss, "logits": logits} if loss is not None else {"logits": logits}
+
+    def gradient_checkpointing_enable(self, **kwargs):
+        """Прокси для HF Trainer: включает gradient checkpointing у roberta-части."""
+        self.roberta.gradient_checkpointing_enable(**kwargs)
+
+    def gradient_checkpointing_disable(self):
+        self.roberta.gradient_checkpointing_disable()
 
 
 def build_model(

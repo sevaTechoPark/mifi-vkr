@@ -24,7 +24,7 @@ from sentence_transformers.evaluation import (
     BinaryClassificationEvaluator,
     EmbeddingSimilarityEvaluator,
 )
-from transformers import EarlyStoppingCallback
+from transformers import EarlyStoppingCallback, TrainerCallback
 
 from bert_embeddings.config import MLMConfig, ensure_dir
 from bert_embeddings.data_utils import (
@@ -32,6 +32,7 @@ from bert_embeddings.data_utils import (
     build_training_dataframe,
     explode_long_texts_for_training,
 )
+
 
 def cleanup_memory():
     gc.collect()
@@ -56,6 +57,7 @@ def set_seed(seed: int):
         except Exception:
             pass
 
+
 def build_sentence_transformer(
     model_name: str,
     max_length: int,
@@ -66,7 +68,6 @@ def build_sentence_transformer(
         max_seq_length=max_length,
         model_kwargs={"torch_dtype": "float32"},
     )
-
     pooling = pooling.lower().strip()
     pooling_model = models.Pooling(
         transformer.get_word_embedding_dimension(),
@@ -74,7 +75,6 @@ def build_sentence_transformer(
         pooling_mode_max_tokens=(pooling == "max"),
         pooling_mode_cls_token=(pooling == "cls"),
     )
-
     normalize = models.Normalize()
     return SentenceTransformer(modules=[transformer, pooling_model, normalize])
 
@@ -85,7 +85,6 @@ def save_encoder_only_from_sentence_transformer(
     meta=None,
 ):
     save_path = ensure_dir(save_dir)
-
     transformer_module = model[0]
     auto_model = transformer_module.auto_model
     tokenizer = transformer_module.tokenizer
@@ -111,11 +110,10 @@ def save_encoder_only_from_sentence_transformer(
 def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
     raw_df = build_training_dataframe(
         train_file,
-        test_path=None, # явно отключаем подмешивание теста
+        test_path=None,
         text_col=cfg.text_col,
         label_col=cfg.label_col,
     )
-
     exploded_df = explode_long_texts_for_training(
         raw_df,
         model_name=cfg.model_name,
@@ -126,7 +124,6 @@ def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
         chunk_overlap=cfg.train_chunk_overlap,
         add_global_chunk=cfg.add_global_chunk_to_training,
     )
-
     pair_df = build_pair_dataframe(
         exploded_df,
         text_col=cfg.text_col,
@@ -134,16 +131,75 @@ def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
         max_pairs_per_label=cfg.max_pairs_per_label,
         max_negative_pairs=cfg.max_negative_pairs,
         seed=cfg.seed,
+        cross_document_positives_only=cfg.cross_document_positives_only,
     )
-
     if len(pair_df) == 0:
         raise ValueError("No training pairs were built from text/label data.")
 
     val_size = min(max(cfg.val_size, 0.01), 0.3)
     ds = Dataset.from_pandas(pair_df, preserve_index=False)
     split_ds = ds.train_test_split(test_size=val_size, seed=cfg.seed)
-
     return raw_df, exploded_df, pair_df, split_ds["train"], split_ds["test"]
+
+
+class FreezeLowerLayersCallback(TrainerCallback):
+    """Замораживает нижние N слоёв энкодера + embeddings на 1-й эпохе."""
+
+    def __init__(self, encoder, n_layers_to_freeze: int):
+        self.encoder = encoder
+        self.n = n_layers_to_freeze
+        self._frozen = False
+
+    def _freeze(self):
+        for i, layer in enumerate(self.encoder.encoder.layer):
+            for p in layer.parameters():
+                p.requires_grad = (i >= self.n)
+        for p in self.encoder.embeddings.parameters():
+            p.requires_grad = False
+        self._frozen = True
+
+    def _unfreeze_all(self):
+        for p in self.encoder.parameters():
+            p.requires_grad = True
+        self._frozen = False
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        if self.n > 0:
+            self._freeze()
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        if self._frozen and (state.epoch or 0) >= 1.0:
+            self._unfreeze_all()
+        return control
+
+
+class RollingResumeCheckpoint(TrainerCallback):
+    """Перезаписывает один resume_checkpoint.pt после каждой эпохи."""
+
+    def __init__(self, path: Path, get_model, get_trainer):
+        self.path = Path(path)
+        self.get_model = get_model
+        self.get_trainer = get_trainer
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        trainer = self.get_trainer()
+        if trainer is None:
+            return control
+        model = self.get_model()
+        payload = {
+            "epoch": int(round(state.epoch)) if state.epoch is not None else None,
+            "global_step": state.global_step,
+            "encoder_state_dict": {
+                k: v.detach().cpu()
+                for k, v in model[0].auto_model.state_dict().items()
+            },
+            "optimizer_state_dict": trainer.optimizer.state_dict() if trainer.optimizer else None,
+            "scheduler_state_dict": trainer.lr_scheduler.state_dict() if trainer.lr_scheduler else None,
+        }
+        tmp = self.path.with_suffix(".pt.tmp")
+        torch.save(payload, tmp)
+        tmp.replace(self.path)
+        return control
 
 
 def run_from_params(
@@ -156,28 +212,27 @@ def run_from_params(
     if cfg is None:
         cfg = MLMConfig()
 
-    checkpoint_every = cfg.checkpoint_every_n_epochs
-
     if kwargs:
         if "num_epochs" in kwargs:
             kwargs["num_train_epochs"] = kwargs.pop("num_epochs")
         if "batch_size" in kwargs:
             kwargs["train_batch_size"] = kwargs.pop("batch_size")
-        if "checkpoint_every_n_epochs" in kwargs:
-            checkpoint_every = kwargs.pop("checkpoint_every_n_epochs")
+        kwargs.pop("checkpoint_every_n_epochs", None)
+        kwargs.pop("save_sentence_transformer_artifacts", None)
 
         valid_fields = MLMConfig.__dataclass_fields__
         cfg = replace(cfg, **{k: v for k, v in kwargs.items() if k in valid_fields})
 
-    cfg = replace(cfg, fp16=torch.cuda.is_available())
+    if not torch.cuda.is_available():
+        cfg = replace(cfg, bf16=False, fp16=False)
+
     cleanup_memory()
     set_seed(cfg.seed)
 
     output_dir = ensure_dir(output_dir)
     metrics_path = output_dir / "metrics.json"
-    checkpoints_dir = ensure_dir(output_dir / "checkpoints")
     best_model_dir = output_dir / "best_model"
-    final_model_dir = output_dir / "final_model"
+    resume_ckpt_path = output_dir / "resume_checkpoint.pt"
     trainer_tmp_dir = output_dir / "_trainer_tmp"
 
     raw_df, exploded_df, pair_df, train_ds, valid_ds = build_train_and_eval_pairs(
@@ -192,12 +247,10 @@ def run_from_params(
 
     train_loss = cfg.train_loss.lower().strip()
 
-    
     if train_loss == "cosent":
         loss = losses.CoSENTLoss(model)
         train_ds = train_ds.remove_columns(["label"])
         valid_ds_for_trainer = valid_ds.remove_columns(["label"])
-
         evaluator = EmbeddingSimilarityEvaluator(
             sentences1=valid_ds["sentence1"],
             sentences2=valid_ds["sentence2"],
@@ -208,22 +261,15 @@ def run_from_params(
         greater_is_better = True
 
     elif train_loss == "mnr":
-        # MultipleNegativesRankingLoss: учим энкодер так, чтобы похожие пары были близко,
-        # а все остальные пары в батче — далеко. Это сильнее, чем SoftmaxLoss,
-        # и устойчиво к шуму в negatives.
-        # Нужны ТОЛЬКО позитивные пары (label == 1).
         pos_mask_train = [int(x) == 1 for x in train_ds["label"]]
         pos_mask_valid = [int(x) == 1 for x in valid_ds["label"]]
-
         train_ds = train_ds.select([i for i, m in enumerate(pos_mask_train) if m])
         valid_ds_for_trainer = valid_ds.select(
             [i for i, m in enumerate(pos_mask_valid) if m]
         )
         train_ds = train_ds.remove_columns(["score", "label"])
         valid_ds_for_trainer = valid_ds_for_trainer.remove_columns(["score", "label"])
-
         loss = losses.MultipleNegativesRankingLoss(model)
-
         evaluator = BinaryClassificationEvaluator(
             sentences1=valid_ds["sentence1"],
             sentences2=valid_ds["sentence2"],
@@ -241,7 +287,6 @@ def run_from_params(
         )
         train_ds = train_ds.remove_columns(["score"])
         valid_ds_for_trainer = valid_ds.remove_columns(["score"])
-
         evaluator = BinaryClassificationEvaluator(
             sentences1=valid_ds["sentence1"],
             sentences2=valid_ds["sentence2"],
@@ -256,6 +301,7 @@ def run_from_params(
         num_train_epochs=cfg.num_train_epochs,
         per_device_train_batch_size=cfg.train_batch_size,
         per_device_eval_batch_size=cfg.eval_batch_size,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         learning_rate=cfg.learning_rate,
         weight_decay=cfg.weight_decay,
         warmup_ratio=cfg.warmup_ratio,
@@ -269,8 +315,30 @@ def run_from_params(
         seed=cfg.seed,
         report_to="none",
         fp16=cfg.fp16,
-        bf16=False,
+        bf16=cfg.bf16,
+        tf32=cfg.tf32 if torch.cuda.is_available() else False,
+        gradient_checkpointing=cfg.gradient_checkpointing,
+        dataloader_num_workers=2,
+        dataloader_pin_memory=True,
     )
+
+    resume_cb_holder = {"trainer": None}
+    resume_cb = RollingResumeCheckpoint(
+        path=resume_ckpt_path,
+        get_model=lambda: model,
+        get_trainer=lambda: resume_cb_holder["trainer"],
+    )
+    callbacks = [
+        EarlyStoppingCallback(early_stopping_patience=cfg.early_stopping_patience),
+        resume_cb,
+    ]
+    if cfg.freeze_lower_layers > 0:
+        callbacks.append(
+            FreezeLowerLayersCallback(
+                encoder=model[0].auto_model,
+                n_layers_to_freeze=cfg.freeze_lower_layers,
+            )
+        )
 
     trainer = SentenceTransformerTrainer(
         model=model,
@@ -279,8 +347,9 @@ def run_from_params(
         eval_dataset=valid_ds_for_trainer,
         loss=loss,
         evaluator=evaluator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=cfg.early_stopping_patience)],
+        callbacks=callbacks,
     )
+    resume_cb_holder["trainer"] = trainer
 
     trainer.train()
     eval_metrics = trainer.evaluate()
@@ -299,26 +368,10 @@ def run_from_params(
         }
     )
 
-    for target_dir in [best_model_dir, final_model_dir]:
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        save_encoder_only_from_sentence_transformer(model, target_dir, meta=meta)
-        if cfg.save_sentence_transformer_artifacts:
-            model.save(str(target_dir / "sentence_transformer"))
-
-    for epoch_idx in range(checkpoint_every, cfg.num_train_epochs + 1, checkpoint_every):
-        ckpt_dir = checkpoints_dir / f"epoch_{epoch_idx:03d}"
-        if ckpt_dir.exists():
-            shutil.rmtree(ckpt_dir)
-        save_encoder_only_from_sentence_transformer(
-            model,
-            ckpt_dir,
-            meta={
-                **meta,
-                "epoch": epoch_idx,
-                "type": "sentence_transformer_domain_encoder_checkpoint",
-            },
-        )
+    # Сохраняем ТОЛЬКО best_model (Trainer уже подтянул лучший в память).
+    if best_model_dir.exists():
+        shutil.rmtree(best_model_dir)
+    save_encoder_only_from_sentence_transformer(model, best_model_dir, meta=meta)
 
     metrics = {
         **meta,
@@ -326,9 +379,7 @@ def run_from_params(
             k: (float(v) if isinstance(v, (np.floating, float)) else v)
             for k, v in eval_metrics.items()
         },
-        "checkpoint_every_n_epochs": checkpoint_every,
     }
-
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
@@ -337,21 +388,20 @@ def run_from_params(
 
     components = {
         "output_dir": str(output_dir),
-        "checkpoints_dir": str(checkpoints_dir),
         "best_model_dir": str(best_model_dir),
-        "final_model_dir": str(final_model_dir),
+        "resume_checkpoint_path": str(resume_ckpt_path),
         "metrics_path": str(metrics_path),
         "model_name": cfg.model_name,
     }
 
     print("\n" + "=" * 56)
     print("Training finished.")
-    print(f"  Raw docs      : {len(raw_df)}")
-    print(f"  Train views   : {len(exploded_df)}")
-    print(f"  Pair count    : {len(pair_df)}")
-    print(f"  Best model    : {components['best_model_dir']}")
-    print(f"  Final model   : {components['final_model_dir']}")
-    print(f"  Metrics path  : {components['metrics_path']}")
+    print(f"  Raw docs        : {len(raw_df)}")
+    print(f"  Train views     : {len(exploded_df)}")
+    print(f"  Pair count      : {len(pair_df)}")
+    print(f"  Best model      : {components['best_model_dir']}")
+    print(f"  Resume ckpt     : {components['resume_checkpoint_path']}")
+    print(f"  Metrics path    : {components['metrics_path']}")
     print("=" * 56)
 
     return components, metrics
@@ -361,7 +411,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Train sentence embeddings for ruRoberta with text/label input."
     )
-
     parser.add_argument("--train-file", type=str, required=True)
     parser.add_argument("--test-file", type=str, required=True)
     parser.add_argument("--output-dir", type=str, required=True)
@@ -374,7 +423,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         arg_name = f"--{f.name.replace('_', '-')}"
         arg_type = type(default)
         parser.add_argument(arg_name, type=arg_type, default=None)
-
     return parser
 
 

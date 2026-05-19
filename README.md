@@ -143,7 +143,7 @@ python -m bert_classification.main \
 
 
 python -m hybrid.main build \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --output-dir ~/papadyk-vkr/data/hybrid_vec \
   --model-dir ~/papadyk-vkr/bert-embeddings-out
@@ -160,11 +160,11 @@ python -m hybrid.main mlp \
   --vecdir ~/papadyk-vkr/data/hybrid_vec \
   --epochs 40 \
   --profile clean
-  
+
 -------
 
 python -m hybrid.main build \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --output-dir ~/papadyk-vkr/data/hybrid_vec
 
@@ -180,17 +180,18 @@ python -m hybrid.main classical \
   --vecdir ~/papadyk-vkr/data/hybrid_vec \
   --epochs 40 \
   --profile clean 
+  
 -------
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --centroid-trim 0
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
@@ -198,14 +199,14 @@ python -m cosine_similarity_classification.main \
   --knn-temperature 0
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --centroid-trim 0.1
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
@@ -213,14 +214,14 @@ python -m cosine_similarity_classification.main \
   --knn-temperature 0.1
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --centroid-trim 0.15
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
@@ -228,14 +229,14 @@ python -m cosine_similarity_classification.main \
   --knn-temperature 0.15
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
   --centroid-trim 0.2
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --model-dir ~/papadyk-vkr/bert-embeddings-out \
@@ -245,52 +246,52 @@ python -m cosine_similarity_classification.main \
 -------
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --centroid-trim 0
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --knn-k-sweep "1,3,5,7,9,11" \
   --knn-temperature 0
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --centroid-trim 0.1
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --knn-k-sweep "1,3,5,7,9,11" \
   --knn-temperature 0.1
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --centroid-trim 0.15
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --knn-k-sweep "1,3,5,7,9,11" \
   --knn-temperature 0.15
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method centroid \
   --centroid-trim 0.2
 
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train.csv \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
   --knn-k-sweep "1,3,5,7,9,11" \

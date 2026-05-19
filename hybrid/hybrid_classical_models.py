@@ -89,7 +89,7 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     for C in c_grid:
         base_kwargs = {
             "C": C, "max_iter": 4000, "random_state": 42,
-            "solver": "lbfgs", "n_jobs": -1,
+            "solver": "lbfgs",
         }
         if class_weight is not None:
             base_kwargs["class_weight"] = class_weight
@@ -222,7 +222,7 @@ def _run_stacking(X_bert_tr, X_bert_te, X_hyb_tr, X_hyb_te, ytr, yte,
             LinearSVC(C=(best_C_bert or 1.0), **base_svc), method="sigmoid", cv=cv
         )),
         ("logreg", LogisticRegression(
-            C=(best_C_bert or 1.0), max_iter=4000, random_state=42, n_jobs=-1,
+            C=(best_C_bert or 1.0), max_iter=4000, random_state=42,
             class_weight=class_weight,
         )),
         ("ridge", CalibratedClassifierCV(
@@ -231,7 +231,7 @@ def _run_stacking(X_bert_tr, X_bert_te, X_hyb_tr, X_hyb_te, ytr, yte,
         )),
     ]
     final_est = LogisticRegression(
-        C=1.0, max_iter=4000, random_state=42, n_jobs=-1,
+        C=1.0, max_iter=4000, random_state=42,
         class_weight=class_weight,
     )
     stack = StackingClassifier(
@@ -306,17 +306,18 @@ def run_classical(
 
     # === hybrid ===
     if "hybrid" in feature_sources:
-        hyb_tr_path = os.path.join(vecdir, "X_train_hybrid.npz")
-        hyb_te_path = os.path.join(vecdir, "X_test_hybrid.npz")
-        X_hyb_tr = sp.load_npz(hyb_tr_path)
-        X_hyb_te = sp.load_npz(hyb_te_path)
-        best_svc, best_lr = _run_on_source(
-            X_hyb_tr, y_train, X_hyb_te, y_test, results,
-            tag="hybrid", c_grid=c_grid, class_weight=class_weight,
-            include_knn_centroid=False,   # sparse: knn-cos сильно медленный
-            include_rbf=False,
-        )
-        bests["hybrid"] = {"svc": best_svc, "lr": best_lr}
+        # Предпочитаем classical-friendly вариант (без финальной L2),
+        # если он есть; иначе фолбэк на стандартный hybrid (для старых vecdir).
+        noL2_tr = os.path.join(vecdir, "X_train_hybrid_noL2.npz")
+        noL2_te = os.path.join(vecdir, "X_test_hybrid_noL2.npz")
+        if os.path.exists(noL2_tr) and os.path.exists(noL2_te):
+            print("[hybrid] using X_train_hybrid_noL2.npz (per-block L2, no final L2)")
+            X_hyb_tr = sp.load_npz(noL2_tr)
+            X_hyb_te = sp.load_npz(noL2_te)
+        else:
+            print("[hybrid] fallback: using X_train_hybrid.npz (final L2 applied)")
+            X_hyb_tr = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz"))
+            X_hyb_te = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz"))
 
     # === tfidf_only ===
     if "tfidf_only" in feature_sources and include_tfidf_only:

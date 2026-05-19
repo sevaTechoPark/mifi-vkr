@@ -228,13 +228,14 @@ def run_build(
         np.save(os.path.join(outdir, "X_test_dense.npy"), X_test_dense.astype(np.float32))
         joblib.dump(svd, os.path.join(outdir, "svd.joblib"))
 
-    # Сохраняем ОБА варианта hybrid:
-    # - X_train_hybrid.npz       — БЕЗ финальной L2 (для classical, новая версия)
-    # - X_train_hybrid_l2.npz    — С финальной L2 (для MLP / backward compat)
-    sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid)
-    sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid)
-    sp.save_npz(os.path.join(outdir, "X_train_hybrid_l2.npz"), X_train_hybrid_l2)
-    sp.save_npz(os.path.join(outdir, "X_test_hybrid_l2.npz"), X_test_hybrid_l2)
+    # === ВАЖНО для backward-compat с MLP ===
+    # X_train_hybrid.npz должен оставаться L2-нормированным после hstack — MLP
+    # был натренирован/настроен под него. Иначе ‖x‖ скачет с 1 до ~5 и MLP плывёт.
+    # Новая «classical-friendly» версия без финальной L2 — отдельный файл.
+    sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid_l2)      # ← back to L2 (для MLP)
+    sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid_l2)        # ← back to L2 (для MLP)
+    sp.save_npz(os.path.join(outdir, "X_train_hybrid_noL2.npz"), X_train_hybrid)    # ← для classical
+    sp.save_npz(os.path.join(outdir, "X_test_hybrid_noL2.npz"), X_test_hybrid)      # ← для classical
     pd.Series(y_train).to_csv(os.path.join(outdir, "y_train.csv"), index=False)
     pd.Series(y_test).to_csv(os.path.join(outdir, "y_test.csv"), index=False)
 
@@ -272,8 +273,8 @@ def run_build(
         "bert_dim": int(X_train_bert_scaled.shape[1]),
         "bert_share_mean": bert_share_mean,
         "bert_l2_per_block": True,
-        "hybrid_final_l2": False,       # для X_train_hybrid.npz
-        "hybrid_l2_file": "X_train_hybrid_l2.npz",  # с финальной L2 для MLP
+        "hybrid_final_l2": True,              # X_train_hybrid.npz — с L2 (для MLP)
+        "hybrid_noL2_file": "X_train_hybrid_noL2.npz",  # без финальной L2 (для classical)
         "bert_only_file": "X_train_bert.npy",
     }
     with open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8") as f:

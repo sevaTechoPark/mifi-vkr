@@ -8,6 +8,7 @@ import random
 import shutil
 from dataclasses import fields, replace
 from pathlib import Path
+import os
 import logging
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
@@ -209,9 +210,19 @@ class RollingResumeCheckpoint(TrainerCallback):
             "optimizer_state_dict": trainer.optimizer.state_dict() if trainer.optimizer else None,
             "scheduler_state_dict": trainer.lr_scheduler.state_dict() if trainer.lr_scheduler else None,
         }
-        tmp = self.path.with_suffix(".pt.tmp")
-        torch.save(payload, tmp)
-        tmp.replace(self.path)
+        # ВАЖНО: пишем in-place в существующий файл (без atomic rename), чтобы
+        # Google Drive не воспринимал rename как delete+create и не отправлял
+        # предыдущую версию в корзину Drive (что забивает место).
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "wb") as f:
+            torch.save(payload, f)
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except OSError:
+                # На некоторых FS (включая Drive-маунты) fsync может бросить —
+                # это не критично, данные уже записаны через flush.
+                pass
         return control
 
 

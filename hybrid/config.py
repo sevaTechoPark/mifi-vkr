@@ -16,11 +16,20 @@ class HybridModelConfig:
     chunk_aggregation: str = _emb.chunk_aggregation
     batch_size: int = _emb.batch_size
 
-    # bert_weight: масштаб BERT-блока ОТНОСИТЕЛЬНО TF-IDF-блока.
-    # 1.0 — TF-IDF и BERT после нормировок дают примерно равный вклад.
-    # 2.0-3.0 — BERT доминирует, но TF-IDF ещё ощутим (хорошо для small-data).
-    # 5.0+ — BERT доминирует почти полностью (старый дефолт, мешал TF-IDF работать).
-    bert_weight: float = 1.0
+    # Два дефолта: для кастомного triplet-обученного эмбеддера (model_dir задан)
+    # имеет смысл сильнее весить BERT-блок, потому что эмбеддинги уже линейно разделимы.
+    # Для baseline ruRoberta (model_dir не задан) TF-IDF реально помогает, и bw=1.0 ок.
+    # Эти дефолты применяются в hybrid/main.py при build, если пользователь явно
+    # не передал --bert-weight в CLI.
+    bert_weight: float = 1.0  # legacy-поле, оставляем для backward compat
+    bert_weight_with_model_dir: float = 5.0
+    bert_weight_base_model: float = 1.0
+
+    # Если True — отключает StandardScaler по BERT-блоку. Включается автоматически
+    # для custom embedder, потому что его выходы уже L2-нормированы (triplet/MNR
+    # обучение специально подгоняет их на единичную сферу). StandardScaler в этом
+    # случае ломает структуру и убивает classical-метрики.
+    disable_bert_scaler: bool = False
 
     # TF-IDF: ngram-границы и min_df.
     word_ngram_min: int = 1

@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import fields, replace
+import sys
 
 import torch
 
@@ -147,6 +148,28 @@ def main():
         model_cfg, data_cfg, path_cfg = build_configs_from_args(args)
         device = _detect_device(args.device)
         print(f"[INFO] Using device: {device}")
+
+        # === АВТО-ДЕФОЛТ bert_weight в зависимости от --model-dir ===
+        # Проверяем, передал ли пользователь --bert-weight явно. Если нет (== 1.0,
+        # который и default в dataclass), и при этом задан --model-dir, переключаемся
+        # на bert_weight_with_model_dir (по умолчанию 5.0).
+        user_passed_bw = any(arg.startswith("--bert-weight") for arg in sys.argv)
+        if not user_passed_bw:
+            if args.model_dir:
+                model_cfg.bert_weight = model_cfg.bert_weight_with_model_dir
+                print(f"[hybrid.build] model_dir is set → auto bert_weight={model_cfg.bert_weight}")
+            else:
+                model_cfg.bert_weight = model_cfg.bert_weight_base_model
+                print(f"[hybrid.build] no model_dir → auto bert_weight={model_cfg.bert_weight}")
+        else:
+            print(f"[hybrid.build] using user-supplied bert_weight={model_cfg.bert_weight}")
+
+        # Авто-выключение StandardScaler для custom embedder
+        # (он уже отдаёт L2-нормированные эмбеддинги).
+        if args.model_dir and not model_cfg.disable_bert_scaler:
+            model_cfg.disable_bert_scaler = True
+            print("[hybrid.build] model_dir is set → disabling BERT StandardScaler "
+                  "(эмбеддинги уже L2-нормированы triplet-обучением)")
 
         run_build(
             train_file=path_cfg.train_file,

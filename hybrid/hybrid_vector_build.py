@@ -181,10 +181,19 @@ def run_build(
             batch_size=model_cfg.batch_size, max_length=model_cfg.max_length,
         )
 
-    # StandardScaler по BERT-блоку
-    scaler_bert = StandardScaler()
-    X_train_bert_scaled = scaler_bert.fit_transform(X_train_bert).astype(np.float32)
-    X_test_bert_scaled = scaler_bert.transform(X_test_bert).astype(np.float32)
+    # StandardScaler по BERT-блоку — нужен только когда BERT-эмбеддинги «сырые»
+    # (документный mean-pool без triplet-обучения). Для custom embedder выключаем,
+    # потому что его выходы уже L2-нормированы и StandardScaler ломает direction.
+    if getattr(model_cfg, "disable_bert_scaler", False):
+        print("[hybrid.build] BERT StandardScaler: DISABLED (custom embedder)")
+        X_train_bert_scaled = X_train_bert.astype(np.float32)
+        X_test_bert_scaled = X_test_bert.astype(np.float32)
+        scaler_bert = None
+    else:
+        print("[hybrid.build] BERT StandardScaler: ENABLED")
+        scaler_bert = StandardScaler()
+        X_train_bert_scaled = scaler_bert.fit_transform(X_train_bert).astype(np.float32)
+        X_test_bert_scaled = scaler_bert.transform(X_test_bert).astype(np.float32)
 
     X_train_bert_weighted = X_train_bert_scaled * float(model_cfg.bert_weight)
     X_test_bert_weighted = X_test_bert_scaled * float(model_cfg.bert_weight)
@@ -235,6 +244,9 @@ def run_build(
         "chunk_aggregation": model_cfg.chunk_aggregation,
         "bert_batch_size": model_cfg.batch_size,
         "bert_weight": float(model_cfg.bert_weight),
+        "bert_scaler_used": scaler_bert is not None,
+        "bert_weight_with_model_dir": float(getattr(model_cfg, "bert_weight_with_model_dir", 5.0)),
+        "bert_weight_base_model": float(getattr(model_cfg, "bert_weight_base_model", 1.0)),
         "svd_components": int(model_cfg.svd_components),
         "train_shape": list(X_train_hybrid.shape),
         "test_shape": list(X_test_hybrid.shape),

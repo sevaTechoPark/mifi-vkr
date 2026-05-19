@@ -19,6 +19,7 @@ from sklearn.svm import LinearSVC
 def _eval(y_true, y_pred):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UndefinedMetricWarning)
+        warnings.simplefilter("ignore", category=UserWarning)
         return {
             "balanced_accuracy": round(float(balanced_accuracy_score(y_true, y_pred)), 6),
             "macro_f1": round(float(f1_score(y_true, y_pred, average="macro", zero_division=0)), 6),

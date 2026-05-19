@@ -2,6 +2,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+import os
 
 import torch
 from transformers import (
@@ -135,7 +136,12 @@ class BestMetricInMemoryCallback(TrainerCallback):
 class RollingResumeCheckpointCallback(TrainerCallback):
     """
     Перезаписывает единственный resume_checkpoint.pt после каждой эпохи.
-    Это ЕДИНСТВЕННЫЙ файл, который bert_classification пишет на диск во время обучения.
+
+    ВАЖНО: пишем in-place в существующий файл (без atomic rename), чтобы Google Drive
+    не воспринимал rename как delete+create и не отправлял предыдущую версию в корзину
+    (что забивает место). Trade-off: при крэше во время записи получим повреждённый
+    чекпоинт. Для нас это приемлемо — чекпоинт пересоздаётся каждую эпоху, и при
+    рестарте мы потеряем максимум одну эпоху обучения.
     """
 
     def __init__(self, output_dir: str):
@@ -163,11 +169,22 @@ class RollingResumeCheckpointCallback(TrainerCallback):
             ),
         }
         target = Path(self.output_dir) / "resume_checkpoint.pt"
-        tmp = target.with_suffix(".pt.tmp")
-        torch.save(payload, tmp)
-        tmp.replace(target)
-        return control
+        target.parent.mkdir(parents=True, exist_ok=True)
 
+        # In-place перезапись:
+        # 1) Открываем файл в "wb" — это truncate + write поверх существующего inode.
+        # 2) torch.save принимает file-like объект.
+        # 3) fsync() на всякий случай форсит сброс на диск.
+        with open(target, "wb") as f:
+            torch.save(payload, f)
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except OSError:
+                # На некоторых FS (включая некоторые Drive-маунты) fsync может бросить —
+                # это не критично, данные уже записаны через flush.
+                pass
+        return control
 
 # =============================================================================
 # WeightedChunkTrainer — раздельный LR для энкодера и головы

@@ -32,12 +32,14 @@ MODEL_DIR: str = ""
 # kNN-параметры для метода "nearest"
 KNN_K: int = 5
 
+
 # kNN: soft-voting параметры
 KNN_TEMPERATURE: float = 0.1
 # Список k для sweep (через CLI --knn-k-sweep "1,3,5,7,9,11").
-# Когда задан — main печатает метрики для каждого k и помечает best.
 KNN_K_SWEEP: str = ""
 
 # Centroid: доля «дальних» точек класса, которые отбрасываются перед усреднением.
-# 0.0 — обычный mean. 0.1-0.2 — рекомендую для small-data с возможными мислейблами.
-CENTROID_TRIM_RATIO: float = 0.0
+# trim=0.15 выбран по результатам v6-сравнения. На custom embedder даёт +1.4pp
+# на train.csv, на baseline +0.7pp. trim=0.2 эквивалентен в среднем, но менее
+# устойчив на baseline_train.
+CENTROID_TRIM_RATIO: float = 0.15

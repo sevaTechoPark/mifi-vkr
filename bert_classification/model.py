@@ -77,6 +77,39 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
         else:
             self.class_weights = None
 
+     def freeze_lower_layers(self, freeze_encoder_layers: int = 0, freeze_embeddings: bool = False) -> dict:
+        """
+        Замораживает указанные нижние слои ruRoberta-large.
+
+        freeze_encoder_layers: int — число нижних layer'ов которые остановим (0..23).
+        freeze_embeddings: bool — заморозить также RobertaEmbeddings (word/position/type).
+
+        Возвращает stats: {frozen_params, trainable_params, total_params}.
+        """
+        total_layers = len(self.roberta.encoder.layer)
+        n_freeze = max(0, min(int(freeze_encoder_layers), total_layers))
+
+        if freeze_embeddings:
+            for p in self.roberta.embeddings.parameters():
+                p.requires_grad = False
+
+        for i in range(n_freeze):
+            for p in self.roberta.encoder.layer[i].parameters():
+                p.requires_grad = False
+
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        frozen_params = total_params - trainable_params
+
+        return {
+            "frozen_encoder_layers": n_freeze,
+            "frozen_embeddings": bool(freeze_embeddings),
+            "total_params": total_params,
+            "trainable_params": trainable_params,
+            "frozen_params": frozen_params,
+            "trainable_ratio": round(trainable_params / max(1, total_params), 4),
+        }        
+
     def token_mean_pool(self, last_hidden_state, attention_mask):
         mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
         masked = last_hidden_state * mask

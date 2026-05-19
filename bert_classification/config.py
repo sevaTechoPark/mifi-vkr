@@ -5,11 +5,19 @@ from dataclasses import dataclass
 class ModelConfig:
     model_name: str = "ai-forever/ruRoberta-large"
     max_length: int = 512
-    # stride 128 вместо 256: меньше избыточных токенов в чанках, быстрее обучение
     stride: int = 128
-    max_chunks: int = 4   # было 6 — на T4/L4 Colab 6 чанков часто OOM
-    head_dropout: float = 0.2  # было 0.4 — слишком агрессивно для small-data
+    max_chunks: int = 6              # A: было 4 — больше контекста для длинных текстов
+    head_dropout: float = 0.2
     label_smoothing: float = 0.02
+
+    # D: Заморозка нижних слоёв ruRoberta-large для борьбы с переобучением.
+    # 0  — ничего не замораживаем (старое поведение).
+    # 12 — заморозить layers 0..11 (нижняя половина) — рекомендуемое значение.
+    # 18 — заморозить layers 0..17 (агрессивно, оставит только 6 верхних).
+    freeze_encoder_layers: int = 12
+    # Embeddings обычно стабильны и небольшой train сильно их не улучшит.
+    # True — рекомендуемое значение для small-data fine-tune.
+    freeze_embeddings: bool = True
 
 
 @dataclass

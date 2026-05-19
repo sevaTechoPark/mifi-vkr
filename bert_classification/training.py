@@ -299,13 +299,25 @@ def build_trainer(
     class_weights_tensor: Optional[torch.Tensor],
 ):
     def model_init():
-        return build_model(
+        model = build_model(
             model_cfg=model_cfg,
             num_labels=len(label2id),
             label2id=label2id,
             id2label=id2label,
             class_weights_tensor=class_weights_tensor,
         )
+        freeze_stats = model.freeze_lower_layers(
+            freeze_encoder_layers=model_cfg.freeze_encoder_layers,
+            freeze_embeddings=model_cfg.freeze_embeddings,
+        )
+        print(
+            f"[freeze] frozen_encoder_layers={freeze_stats['frozen_encoder_layers']}, "
+            f"frozen_embeddings={freeze_stats['frozen_embeddings']}, "
+            f"trainable={freeze_stats['trainable_params']/1e6:.1f}M / "
+            f"{freeze_stats['total_params']/1e6:.1f}M "
+            f"({freeze_stats['trainable_ratio']*100:.1f}%)"
+        )
+        return model
 
     training_args = build_training_arguments(path_cfg, train_cfg)
 

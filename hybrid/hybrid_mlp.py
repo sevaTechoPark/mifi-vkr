@@ -3,6 +3,7 @@ import json
 import argparse
 import warnings
 
+import random
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -18,17 +19,15 @@ from sklearn.utils.class_weight import compute_class_weight
 
 from .config import HybridMLPConfig, hybrid_mlp_config_from_profile, HYBRID_MLP_PROFILES
 
-
-def _set_seed(seed: int) -> None:
-    torch.manual_seed(seed)
+def _seed_everything(seed: int):
+    random.seed(seed)
     np.random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    if torch.backends.mps.is_available():
-        try:
-            torch.mps.manual_seed(seed)
-        except Exception:
-            pass
+    # CuDNN детерминизм (включается опционально, может замедлить)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 class DenseDataset(Dataset):
@@ -186,7 +185,7 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
     if cfg is None:
         cfg = HybridMLPConfig()
     n_epochs = int(epochs) if epochs is not None else int(cfg.epochs)
-    _set_seed(cfg.seed)
+    _seed_everything(cfg.seed)
 
     # Если есть dense-версия (после SVD) — берём её, она быстрее и часто лучше для MLP.
     dense_train = os.path.join(vecdir, "X_train_dense.npy")

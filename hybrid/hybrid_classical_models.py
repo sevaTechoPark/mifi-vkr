@@ -14,7 +14,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, RidgeClassifier, SGDClassifier
 from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.naive_bayes import ComplementNB, MultinomialNB
-from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
 from sklearn.svm import LinearSVC, SVC
 from sklearn.ensemble import StackingClassifier
 from sklearn.preprocessing import normalize
@@ -113,8 +112,7 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 # -----------------------------------------------------------------------------
 # Per-source pipelines
 # -----------------------------------------------------------------------------
-def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
-                   include_knn_centroid=True, include_rbf=False):
+def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight, include_rbf=False):
     """
     Прогон полного набора линейных моделей на одной фиче.
     tag: 'bert_only' | 'hybrid' | 'tfidf_only'
@@ -158,30 +156,7 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
     _safe_fit_eval("sgd_hinge", SGDClassifier(**sgd_kwargs),
                    Xtr, ytr, Xte, yte, results, tag=tag)
 
-    # 6) NearestCentroid и KNN-cos — только на L2-нормированных представлениях
-    #    (bert_only уже L2; hybrid после изменений тоже разумен)
-    if include_knn_centroid:
-        # для разреженных матриц NearestCentroid с metric='cosine' не работает,
-        # но т.к. векторы L2-нормированы, euclidean ≡ cosine с точностью до константы
-        if sp.issparse(Xtr):
-            _safe_fit_eval("nearest_centroid_euc",
-                           NearestCentroid(metric="euclidean"),
-                           Xtr, ytr, Xte, yte, results, tag=tag)
-            _safe_fit_eval("knn5_euc",
-                           KNeighborsClassifier(n_neighbors=5, metric="euclidean", n_jobs=-1),
-                           Xtr, ytr, Xte, yte, results, tag=tag)
-        else:
-            _safe_fit_eval("nearest_centroid_cos",
-                           NearestCentroid(metric="euclidean"),  # L2-norm → eq cosine
-                           Xtr, ytr, Xte, yte, results, tag=tag)
-            _safe_fit_eval("knn5_cos",
-                           KNeighborsClassifier(n_neighbors=5, metric="cosine", n_jobs=-1),
-                           Xtr, ytr, Xte, yte, results, tag=tag)
-            _safe_fit_eval("knn3_cos",
-                           KNeighborsClassifier(n_neighbors=3, metric="cosine", n_jobs=-1),
-                           Xtr, ytr, Xte, yte, results, tag=tag)
-
-    # 7) SVC-rbf — только для dense bert_only (на hybrid слишком дорого/мусор)
+    # 6) SVC-rbf — только для dense bert_only (на hybrid слишком дорого/мусор)
     if include_rbf and not sp.issparse(Xtr):
         rbf_kwargs = {"random_state": 42, "kernel": "rbf", "C": 4.0, "gamma": "scale"}
         if class_weight is not None:
@@ -297,7 +272,7 @@ def run_classical(
             best_svc, best_lr = _run_on_source(
                 X_bert_tr, y_train, X_bert_te, y_test, results,
                 tag="bert_only", c_grid=c_grid, class_weight=class_weight,
-                include_knn_centroid=True, include_rbf=enable_rbf,
+                include_rbf=enable_rbf,
             )
             bests["bert_only"] = {"svc": best_svc, "lr": best_lr}
         else:
@@ -306,8 +281,6 @@ def run_classical(
 
     # === hybrid ===
     if "hybrid" in feature_sources:
-        # Предпочитаем classical-friendly вариант (без финальной L2),
-        # если он есть; иначе фолбэк на стандартный hybrid (для старых vecdir).
         noL2_tr = os.path.join(vecdir, "X_train_hybrid_noL2.npz")
         noL2_te = os.path.join(vecdir, "X_test_hybrid_noL2.npz")
         if os.path.exists(noL2_tr) and os.path.exists(noL2_te):
@@ -318,6 +291,13 @@ def run_classical(
             print("[hybrid] fallback: using X_train_hybrid.npz (final L2 applied)")
             X_hyb_tr = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz"))
             X_hyb_te = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz"))
+        # ← ВОТ ЭТОТ ВЫЗОВ ПРОПАЛ ИЗ ТВОЕГО ЛОГА: добавлен явно
+        best_svc, best_lr = _run_on_source(
+            X_hyb_tr, y_train, X_hyb_te, y_test, results,
+            tag="hybrid", c_grid=c_grid, class_weight=class_weight,
+            include_rbf=False,
+        )
+        bests["hybrid"] = {"svc": best_svc, "lr": best_lr}
 
     # === tfidf_only ===
     if "tfidf_only" in feature_sources and include_tfidf_only:
@@ -348,8 +328,7 @@ def run_classical(
             # full linear suite + grid
             _run_on_source(
                 Xtr, ytr, Xte, yte, results,
-                tag="tfidf_only", c_grid=c_grid, class_weight=class_weight,
-                include_knn_centroid=False, include_rbf=False,
+                tag="tfidf_only", c_grid=c_grid, class_weight=class_weight, include_rbf=False,
             )
 
     # === Stacking (на bert_only) ===

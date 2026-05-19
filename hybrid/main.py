@@ -140,8 +140,10 @@ def build_parser():
         "--profile",
         type=str,
         default=None,
-        choices=sorted(HYBRID_MLP_PROFILES.keys()),
-        help='Профиль гиперпараметров: "noisy" (для baseline) или "clean" (для custom_embedder).',
+        choices=sorted(HYBRID_MLP_PROFILES.keys()),  # → ["clean", "custom", "noisy"]
+        help='Профиль гиперпараметров MLP. По умолчанию выбирается автоматически '
+             'по meta.json (custom_embedder → "custom", baseline → "noisy"). '
+             'Можно явно задать "custom" / "clean" / "noisy".',
     )
 
     return parser
@@ -189,7 +191,7 @@ def main():
         )
     elif args.command == "classical":
         sources = tuple(s.strip() for s in (args.feature_sources or "bert_only,hybrid,tfidf_only").split(",") if s.strip())
-        c_grid = tuple(float(c) for c in (args.c_grid or "0.1,0.3,1.0,3.0").split(",") if c.strip())
+        c_grid = tuple(float(c) for c in (args.c_grid or "0.1,0.3,0.5,1.0,2.0,3.0,5.0").split(",") if c.strip())
         run_classical(
             args.vecdir,
             class_weight=args.class_weight,
@@ -204,8 +206,18 @@ def main():
         print(f"[INFO] Using device: {device}")
 
         from .hybrid_mlp import _cfg_from_args
-        cfg = _cfg_from_args(args)
+        from .config import autodetect_mlp_profile, DEFAULT_HYBRID_MLP_PROFILE
 
+        # Автодетект профиля по meta.json в vecdir, если пользователь не указал --profile.
+        if not args.profile:
+            detected = autodetect_mlp_profile(args.vecdir)
+            print(f"[mlp] profile not specified → autodetected: '{detected}' "
+                  f"(на основе meta.json в {args.vecdir})")
+            args.profile = detected
+        else:
+            print(f"[mlp] using user-specified profile: '{args.profile}'")
+
+        cfg = _cfg_from_args(args)
         run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device)
     else:
         raise ValueError(f"Unknown command: {args.command}")

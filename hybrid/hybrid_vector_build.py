@@ -181,9 +181,8 @@ def run_build(
             batch_size=model_cfg.batch_size, max_length=model_cfg.max_length,
         )
 
-    # StandardScaler по BERT-блоку — нужен только когда BERT-эмбеддинги «сырые»
-    # (документный mean-pool без triplet-обучения). Для custom embedder выключаем,
-    # потому что его выходы уже L2-нормированы и StandardScaler ломает direction.
+    # StandardScaler по BERT-блоку — нужен только для baseline ruRoberta (raw mean-pool).
+    # Для custom embedder выключаем — он уже L2-нормирован triplet/MNR-обучением.
     if getattr(model_cfg, "disable_bert_scaler", False):
         print("[hybrid.build] BERT StandardScaler: DISABLED (custom embedder)")
         X_train_bert_scaled = X_train_bert.astype(np.float32)
@@ -195,28 +194,47 @@ def run_build(
         X_train_bert_scaled = scaler_bert.fit_transform(X_train_bert).astype(np.float32)
         X_test_bert_scaled = scaler_bert.transform(X_test_bert).astype(np.float32)
 
-    X_train_bert_weighted = X_train_bert_scaled * float(model_cfg.bert_weight)
-    X_test_bert_weighted = X_test_bert_scaled * float(model_cfg.bert_weight)
+    # ВАЖНО: L2-нормируем BERT-блок ОТДЕЛЬНО, до конкатенации с TF-IDF.
+    # Это убирает зависимость эффективного веса BERT от длины TF-IDF-вектора.
+    X_train_bert_l2 = normalize(X_train_bert_scaled, norm="l2", axis=1).astype(np.float32)
+    X_test_bert_l2 = normalize(X_test_bert_scaled, norm="l2", axis=1).astype(np.float32)
+
+    # Сохраняем bert-only представление для classical (это даёт лучший single-model
+    # результат на коротком train).
+    np.save(os.path.join(outdir, "X_train_bert.npy"), X_train_bert_l2)
+    np.save(os.path.join(outdir, "X_test_bert.npy"), X_test_bert_l2)
+
+    # Гибридный вектор: TF-IDF (уже L2) + BERT (L2) * bert_weight, БЕЗ финального normalize.
+    # Финальная L2 на hstack ломает per-block структуру → классике это вредит.
+    X_train_bert_weighted = X_train_bert_l2 * float(model_cfg.bert_weight)
+    X_test_bert_weighted = X_test_bert_l2 * float(model_cfg.bert_weight)
 
     X_train_hybrid = sp.hstack([X_train_tfidf, sp.csr_matrix(X_train_bert_weighted)]).tocsr()
     X_test_hybrid = sp.hstack([X_test_tfidf, sp.csr_matrix(X_test_bert_weighted)]).tocsr()
 
-    X_train_hybrid = normalize(X_train_hybrid, norm="l2")
-    X_test_hybrid = normalize(X_test_hybrid, norm="l2")
+    # Дополнительно — версия с финальным normalize, для совместимости с MLP-веткой,
+    # которая ожидала L2-нормированный hybrid (не ломаем интерфейс).
+    X_train_hybrid_l2 = normalize(X_train_hybrid, norm="l2")
+    X_test_hybrid_l2 = normalize(X_test_hybrid, norm="l2")
 
-    # Опциональный TruncatedSVD для плотного представления
+    # Опциональный TruncatedSVD для плотного представления (как было)
     svd = None
     if model_cfg.svd_components and model_cfg.svd_components > 0:
-        n_comp = min(model_cfg.svd_components, X_train_hybrid.shape[1] - 1, X_train_hybrid.shape[0] - 1)
+        n_comp = min(model_cfg.svd_components, X_train_hybrid_l2.shape[1] - 1, X_train_hybrid_l2.shape[0] - 1)
         svd = TruncatedSVD(n_components=n_comp, random_state=42)
-        X_train_dense = svd.fit_transform(X_train_hybrid)
-        X_test_dense = svd.transform(X_test_hybrid)
+        X_train_dense = svd.fit_transform(X_train_hybrid_l2)
+        X_test_dense = svd.transform(X_test_hybrid_l2)
         np.save(os.path.join(outdir, "X_train_dense.npy"), X_train_dense.astype(np.float32))
         np.save(os.path.join(outdir, "X_test_dense.npy"), X_test_dense.astype(np.float32))
         joblib.dump(svd, os.path.join(outdir, "svd.joblib"))
 
+    # Сохраняем ОБА варианта hybrid:
+    # - X_train_hybrid.npz       — БЕЗ финальной L2 (для classical, новая версия)
+    # - X_train_hybrid_l2.npz    — С финальной L2 (для MLP / backward compat)
     sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid)
     sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid)
+    sp.save_npz(os.path.join(outdir, "X_train_hybrid_l2.npz"), X_train_hybrid_l2)
+    sp.save_npz(os.path.join(outdir, "X_test_hybrid_l2.npz"), X_test_hybrid_l2)
     pd.Series(y_train).to_csv(os.path.join(outdir, "y_train.csv"), index=False)
     pd.Series(y_test).to_csv(os.path.join(outdir, "y_test.csv"), index=False)
 
@@ -253,6 +271,10 @@ def run_build(
         "tfidf_dim": int(X_train_tfidf.shape[1]),
         "bert_dim": int(X_train_bert_scaled.shape[1]),
         "bert_share_mean": bert_share_mean,
+        "bert_l2_per_block": True,
+        "hybrid_final_l2": False,       # для X_train_hybrid.npz
+        "hybrid_l2_file": "X_train_hybrid_l2.npz",  # с финальной L2 для MLP
+        "bert_only_file": "X_train_bert.npy",
     }
     with open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

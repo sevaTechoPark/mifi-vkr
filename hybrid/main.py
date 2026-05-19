@@ -112,6 +112,13 @@ def build_parser():
         help="Run classical models on hybrid vectors",
     )
     classical_parser.add_argument("--vecdir", required=True)
+    classical_parser.add_argument("--class-weight", default=None,
+                                  choices=[None, "balanced"], nargs="?")
+    classical_parser.add_argument("--no-tfidf-only", action="store_true")
+    classical_parser.add_argument("--feature-sources", default=None)
+    classical_parser.add_argument("--c-grid", default=None)
+    classical_parser.add_argument("--no-stacking", action="store_true")
+    classical_parser.add_argument("--no-rbf", action="store_true")
 
     mlp_parser = subparsers.add_parser("mlp", help="Run MLP on hybrid vectors")
     mlp_parser.add_argument("--vecdir", required=True)
@@ -181,7 +188,17 @@ def main():
             data_cfg=data_cfg,
         )
     elif args.command == "classical":
-        run_classical(args.vecdir)
+        sources = tuple(s.strip() for s in (args.feature_sources or "bert_only,hybrid,tfidf_only").split(",") if s.strip())
+        c_grid = tuple(float(c) for c in (args.c_grid or "0.1,0.3,1.0,3.0").split(",") if c.strip())
+        run_classical(
+            args.vecdir,
+            class_weight=args.class_weight,
+            include_tfidf_only=(not args.no_tfidf_only) and ("tfidf_only" in sources),
+            feature_sources=sources,
+            c_grid=c_grid,
+            enable_stacking=not args.no_stacking,
+            enable_rbf=not args.no_rbf,
+        )
     elif args.command == "mlp":
         device = _detect_device(args.device)
         print(f"[INFO] Using device: {device}")

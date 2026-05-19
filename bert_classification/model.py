@@ -77,7 +77,7 @@ class ChunkMeanPoolRobertaClassifier(nn.Module):
         else:
             self.class_weights = None
 
-     def freeze_lower_layers(self, freeze_encoder_layers: int = 0, freeze_embeddings: bool = False) -> dict:
+    def freeze_lower_layers(self, freeze_encoder_layers: int = 0, freeze_embeddings: bool = False) -> dict:
         """
         Замораживает указанные нижние слои ruRoberta-large.
 

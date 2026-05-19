@@ -16,7 +16,7 @@ from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 
-from .config import HybridMLPConfig
+from .config import HybridMLPConfig, hybrid_mlp_config_from_profile, HYBRID_MLP_PROFILES
 
 
 def _set_seed(seed: int) -> None:
@@ -310,6 +310,20 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
         "num_classes": int(num_classes),
         "input_dim": int(X_train.shape[1]),
         "seed": cfg.seed,
+        "config_full": {
+            "learning_rate": cfg.learning_rate,
+            "weight_decay": cfg.weight_decay,
+            "epochs": cfg.epochs,
+            "patience": cfg.patience,
+            "hidden_dim": cfg.hidden_dim,
+            "num_blocks": cfg.num_blocks,
+            "dropout": cfg.dropout,
+            "focal_gamma": cfg.focal_gamma,
+            "label_smoothing": cfg.label_smoothing,
+            "mixup_alpha": cfg.mixup_alpha,
+            "use_class_weight": cfg.use_class_weight,
+            "batch_size": cfg.batch_size,
+        },
     }
 
     print("\nBEST RESULT")
@@ -341,12 +355,21 @@ def build_argparser():
     parser.add_argument("--label-smoothing", type=float, default=None)
     parser.add_argument("--mixup-alpha", type=float, default=None)
     parser.add_argument("--use-class-weight", type=lambda v: str(v).lower() in {"true","1","yes"}, default=None)
+    parser.add_argument("--profile", type=str, default=None, choices=sorted(HYBRID_MLP_PROFILES.keys()), help='Профиль гиперпараметров: "noisy" (для baseline) или "clean" (для custom_embedder).')
     return parser
 
 
 def _cfg_from_args(args):
     from dataclasses import replace
-    cfg = HybridMLPConfig()
+
+    # 1) База: либо профиль, либо обычный HybridMLPConfig()
+    if getattr(args, "profile", None):
+        cfg = hybrid_mlp_config_from_profile(args.profile)
+        print(f"[hybrid_mlp] using profile: {args.profile!r}")
+    else:
+        cfg = HybridMLPConfig()
+
+    # 2) CLI-оверрайды поверх профиля
     overrides = {}
     for name in (
         "seed", "batch_size", "learning_rate", "patience", "weight_decay",

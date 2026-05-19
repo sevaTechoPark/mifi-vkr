@@ -107,7 +107,7 @@ def run_classical(
 
     _fit_eval(
         "logreg",
-        LogisticRegression(max_iter=2000, n_jobs=-1, **base_kwargs),
+        LogisticRegression(max_iter=2000, **base_kwargs),
         X_train, y_train, X_test, y_test, results,
     )
 
@@ -143,7 +143,7 @@ def run_classical(
                       Xtr, ytr, Xte, yte, results)
             _fit_eval("complement_nb_tfidf_only", ComplementNB(),
                       Xtr, ytr, Xte, yte, results)
-            nb_lr = LogisticRegression(max_iter=2000, n_jobs=-1, **base_kwargs)
+            nb_lr = LogisticRegression(max_iter=2000, **base_kwargs)
             _fit_eval("logreg_tfidf_only", nb_lr, Xtr, ytr, Xte, yte, results)
 
     # Сохраняем сводку

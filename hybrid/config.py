@@ -77,3 +77,61 @@ class HybridMLPConfig:
     # Mixup в feature space (на скрытом представлении после input_proj)
     # 0 — выключен. 0.1-0.3 — типично. Помогает при сильном дисбалансе.
     mixup_alpha: float = 0.2
+
+# -----------------------------------------------------------------------------
+# Профили HybridMLP под качество входных эмбеддингов
+# -----------------------------------------------------------------------------
+
+# "noisy"  — для baseline ruRoberta-large-chunkmean (необучаемая модель).
+#            Эмбеддинги шумные → нужна агрессивная регуляризация:
+#            mixup, label_smoothing, focal_gamma, class_weight, более высокий dropout.
+#
+# "clean"  — для custom_embedder (после v3 fix: pooling match, MNR без overlap,
+#            normalize+max consistency). Эмбеддинги уже хорошо разделяют классы →
+#            всякая регуляризация (mixup, label_smoothing) только мешает.
+HYBRID_MLP_PROFILES = {
+    "noisy": dict(
+        learning_rate=3e-4,
+        weight_decay=1e-2,
+        epochs=40,
+        patience=8,
+        hidden_dim=512,
+        num_blocks=2,
+        dropout=0.4,
+        focal_gamma=1.0,
+        label_smoothing=0.05,
+        mixup_alpha=0.2,
+        use_class_weight=True,
+    ),
+    "clean": dict(
+        learning_rate=2e-4,
+        weight_decay=5e-3,
+        epochs=30,
+        patience=6,
+        hidden_dim=384,    # эмбеддинги уже разделены, меньшая модель быстрее и не переобучается
+        num_blocks=1,      # 1 residual block достаточно
+        dropout=0.2,       # умеренно
+        focal_gamma=0.0,   # обычный CE (focal только мешает, когда классы и так разделимы)
+        label_smoothing=0.0,
+        mixup_alpha=0.0,   # выключен
+        use_class_weight=False,  # эмбеддинги нормированы, class_weight перекосит decision boundary
+    ),
+}
+
+
+def hybrid_mlp_config_from_profile(profile: str = "noisy", **overrides) -> HybridMLPConfig:
+    """
+    Сборка HybridMLPConfig по имени профиля.
+    overrides — позволяет переопределить любое поле (например, epochs=50).
+    """
+    if profile not in HYBRID_MLP_PROFILES:
+        raise ValueError(
+            f"Unknown profile {profile!r}. Available: {list(HYBRID_MLP_PROFILES.keys())}"
+        )
+    base = HybridMLPConfig()
+    profile_overrides = HYBRID_MLP_PROFILES[profile]
+    from dataclasses import replace
+    cfg = replace(base, **profile_overrides)
+    if overrides:
+        cfg = replace(cfg, **overrides)
+    return cfg

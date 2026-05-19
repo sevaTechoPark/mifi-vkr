@@ -3,7 +3,12 @@ from dataclasses import fields, replace
 
 import torch
 
-from .config import HybridModelConfig, HybridDataConfig, HybridPathConfig
+from .config import (
+    HybridModelConfig,
+    HybridDataConfig,
+    HybridPathConfig,
+    HYBRID_MLP_PROFILES,
+)
 from .hybrid_vector_build import run_build
 from .hybrid_classical_models import run_classical
 from .hybrid_mlp import run_mlp
@@ -123,6 +128,13 @@ def build_parser():
     mlp_parser.add_argument("--dropout", type=float, default=None)
     mlp_parser.add_argument("--focal-gamma", type=float, default=None)
     mlp_parser.add_argument("--label-smoothing", type=float, default=None)
+    mlp_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        choices=sorted(HYBRID_MLP_PROFILES.keys()),
+        help='Профиль гиперпараметров: "noisy" (для baseline) или "clean" (для custom_embedder).',
+    )
 
     return parser
 

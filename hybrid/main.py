@@ -10,6 +10,8 @@ from .config import (
     HybridPathConfig,
     HYBRID_MLP_PROFILES,
     DEFAULT_HYBRID_MLP_PROFILE,
+    HYBRID_MLP_FEATURE_SOURCES,
+    DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
 )
 from .hybrid_vector_build import run_build
 from .hybrid_classical_models import run_classical
@@ -104,9 +106,8 @@ def build_parser():
         "classical", help="Run classical models on hybrid vectors",
     )
     classical_parser.add_argument("--vecdir", required=True)
-    # v14: default='balanced' (было None). 'none' отключает class_weight.
-    classical_parser.add_argument("--class-weight", default="balanced",
-                                  choices=["balanced", "none"], nargs="?")
+    classical_parser.add_argument("--class-weight", default=None,
+                                  choices=[None, "balanced"], nargs="?")
     classical_parser.add_argument("--no-tfidf-only", action="store_true")
     classical_parser.add_argument("--feature-sources", default=None)
     classical_parser.add_argument("--c-grid", default=None)
@@ -133,7 +134,12 @@ def build_parser():
     mlp_parser.add_argument(
         "--profile", type=str, default=None,
         choices=sorted(HYBRID_MLP_PROFILES.keys()),
-        help=f'MLP profile. Default: "{DEFAULT_HYBRID_MLP_PROFILE}".',
+        help=f'MLP profile. По умолчанию выбирается от --features.',
+    )
+    mlp_parser.add_argument(
+        "--features", type=str, default=None,
+        choices=list(HYBRID_MLP_FEATURE_SOURCES),
+        help=f'Источник фич для MLP. По умолчанию: "{DEFAULT_HYBRID_MLP_FEATURE_SOURCE}".',
     )
     return parser
 
@@ -175,10 +181,9 @@ def main():
     elif args.command == "classical":
         sources = tuple(s.strip() for s in (args.feature_sources or "bert_only,hybrid,tfidf_only").split(",") if s.strip())
         c_grid = tuple(float(c) for c in (args.c_grid or "0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0").split(",") if c.strip())
-        cw = None if (args.class_weight in (None, "none")) else args.class_weight
         run_classical(
             args.vecdir,
-            class_weight=cw,
+            class_weight=args.class_weight,
             include_tfidf_only=(not args.no_tfidf_only) and ("tfidf_only" in sources),
             feature_sources=sources,
             c_grid=c_grid,
@@ -190,8 +195,9 @@ def main():
         print(f"[INFO] Using device: {device}")
 
         from .hybrid_mlp import _cfg_from_args
-        cfg = _cfg_from_args(args)
-        run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device)
+        cfg, feature_source = _cfg_from_args(args)
+        run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device,
+                feature_source=feature_source)
     else:
         raise ValueError(f"Unknown command: {args.command}")
 

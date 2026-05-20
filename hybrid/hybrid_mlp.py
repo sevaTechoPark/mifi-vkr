@@ -17,7 +17,14 @@ from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 
-from .config import HybridMLPConfig, hybrid_mlp_config_from_profile, HYBRID_MLP_PROFILES
+from .config import (
+    HybridMLPConfig,
+    hybrid_mlp_config_from_profile,
+    HYBRID_MLP_PROFILES,
+    HYBRID_MLP_FEATURE_SOURCES,
+    DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
+    default_mlp_profile_for_features,
+)
 
 
 def _seed_everything(seed: int):
@@ -172,22 +179,71 @@ def _resolve_device(device):
     return torch.device(name)
 
 
-def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = None, device=None):
+def _load_features(vecdir: str, feature_source: str):
+    """
+    Загружаем фичи в зависимости от источника.
+
+    feature_source='bert_only': X_{train,test}_bert.npy (1024-dim dense, L2-norm).
+        Это те же фичи, на которых классическая LogReg/LinearSVC дают 0.54+.
+        ОБЯЗАТЕЛЬНЫЕ файлы.
+
+    feature_source='hybrid': X_{train,test}_hybrid.npz (sparse, ≈78507-dim).
+        Если есть X_{train,test}_dense.npy (SVD-сжатые) — используем их.
+        Этот путь сохранён ради backward compat.
+    """
+    if feature_source == "bert_only":
+        bert_train = os.path.join(vecdir, "X_train_bert.npy")
+        bert_test = os.path.join(vecdir, "X_test_bert.npy")
+        if not (os.path.exists(bert_train) and os.path.exists(bert_test)):
+            raise FileNotFoundError(
+                f"feature_source='bert_only' требует файлов:\n"
+                f"  {bert_train}\n"
+                f"  {bert_test}\n"
+                f"Они создаются на этапе `python -m hybrid.main build`. "
+                f"Перестрой векторы или используй --features hybrid."
+            )
+        X_train = np.load(bert_train).astype(np.float32)
+        X_test = np.load(bert_test).astype(np.float32)
+        print(f"[hybrid_mlp] features='bert_only' (dense L2-norm) dim={X_train.shape[1]}")
+        return X_train, X_test
+
+    if feature_source == "hybrid":
+        dense_train = os.path.join(vecdir, "X_train_dense.npy")
+        dense_test = os.path.join(vecdir, "X_test_dense.npy")
+        if os.path.exists(dense_train) and os.path.exists(dense_test):
+            X_train = np.load(dense_train).astype(np.float32)
+            X_test = np.load(dense_test).astype(np.float32)
+            print(f"[hybrid_mlp] features='hybrid' (DENSE/SVD) dim={X_train.shape[1]}")
+        else:
+            X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz")).astype(np.float32).toarray()
+            X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz")).astype(np.float32).toarray()
+            print(f"[hybrid_mlp] features='hybrid' (SPARSE→DENSE) dim={X_train.shape[1]}")
+        return X_train, X_test
+
+    raise ValueError(
+        f"Unknown feature_source={feature_source!r}. "
+        f"Allowed: {HYBRID_MLP_FEATURE_SOURCES}"
+    )
+
+
+def run_mlp(
+    vecdir,
+    cfg: HybridMLPConfig | None = None,
+    epochs: int | None = None,
+    device=None,
+    feature_source: str = DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
+):
     if cfg is None:
         cfg = HybridMLPConfig()
+    if feature_source not in HYBRID_MLP_FEATURE_SOURCES:
+        raise ValueError(
+            f"feature_source must be one of {HYBRID_MLP_FEATURE_SOURCES}, "
+            f"got {feature_source!r}"
+        )
     n_epochs = int(epochs) if epochs is not None else int(cfg.epochs)
     _seed_everything(cfg.seed)
 
-    dense_train = os.path.join(vecdir, "X_train_dense.npy")
-    dense_test = os.path.join(vecdir, "X_test_dense.npy")
-    if os.path.exists(dense_train) and os.path.exists(dense_test):
-        X_train = np.load(dense_train).astype(np.float32)
-        X_test = np.load(dense_test).astype(np.float32)
-        print(f"[hybrid_mlp] using DENSE (SVD) features: dim={X_train.shape[1]}")
-    else:
-        X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz")).astype(np.float32).toarray()
-        X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz")).astype(np.float32).toarray()
-        print(f"[hybrid_mlp] using SPARSE→DENSE hybrid features: dim={X_train.shape[1]}")
+    X_train, X_test = _load_features(vecdir, feature_source)
 
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
@@ -214,7 +270,6 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
     device = _resolve_device(device)
     pin = (device.type == "cuda")
 
-    # Детерминированный DataLoader: generator из seed
     g = torch.Generator()
     g.manual_seed(cfg.seed)
     train_loader = DataLoader(
@@ -242,7 +297,6 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
         weight_decay=cfg.weight_decay,
     )
 
-    # === Warmup + cosine LR scheduler ===
     warmup_epochs = int(getattr(cfg, "warmup_epochs", 0))
     base_lr = cfg.learning_rate
     min_lr = cfg.min_lr
@@ -250,12 +304,10 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
 
     def _set_lr(epoch_idx):
         if warmup_epochs > 0 and epoch_idx < warmup_epochs:
-            # линейный warmup от 0 до base_lr
             warmup_lr = base_lr * (epoch_idx + 1) / max(1, warmup_epochs)
             for pg in optimizer.param_groups:
                 pg["lr"] = warmup_lr
             return
-        # после warmup — cosine annealing на оставшиеся эпохи
         cosine_epochs = max(1, n_epochs - warmup_epochs)
         progress = (epoch_idx - warmup_epochs) / cosine_epochs
         progress = min(max(progress, 0.0), 1.0)
@@ -319,6 +371,7 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
         "best_macro_f1": best_f1,
         "best_metrics": best_metrics,
         "epochs_ran": epoch + 1,
+        "feature_source": feature_source,
         "batch_size": cfg.batch_size,
         "lr": cfg.learning_rate,
         "patience": cfg.patience,
@@ -371,20 +424,36 @@ def build_argparser():
     parser.add_argument("--max-grad-norm", type=float, default=None)
     parser.add_argument("--profile", type=str, default=None,
                         choices=sorted(HYBRID_MLP_PROFILES.keys()),
-                        help='Профиль гиперпараметров: "noisy" (DEFAULT), "clean", "custom" (экспериментальный).')
+                        help='Профиль гиперпараметров. По умолчанию выбирается от --features.')
+    parser.add_argument(
+        "--features", type=str, default=None,
+        choices=list(HYBRID_MLP_FEATURE_SOURCES),
+        help=f'Источник фич. По умолчанию: "{DEFAULT_HYBRID_MLP_FEATURE_SOURCE}".',
+    )
     return parser
 
 
 def _cfg_from_args(args):
+    """
+    Сборка cfg + feature_source из argparse Namespace.
+    Возвращает (cfg, feature_source).
+
+    Логика выбора профиля:
+      - если --profile задан явно → используем его;
+      - иначе профиль выбирается от --features (см. default_mlp_profile_for_features).
+    """
     from dataclasses import replace
 
+    feature_source = getattr(args, "features", None) or DEFAULT_HYBRID_MLP_FEATURE_SOURCE
+
     if getattr(args, "profile", None):
-        cfg = hybrid_mlp_config_from_profile(args.profile)
-        print(f"[hybrid_mlp] using profile: {args.profile!r}")
+        profile_name = args.profile
+        print(f"[hybrid_mlp] using profile: {profile_name!r} (explicit)")
     else:
-        # Дефолт — noisy
-        cfg = hybrid_mlp_config_from_profile("noisy")
-        print(f"[hybrid_mlp] using default profile: 'noisy'")
+        profile_name = default_mlp_profile_for_features(feature_source)
+        print(f"[hybrid_mlp] using profile: {profile_name!r} (auto for features={feature_source!r})")
+
+    cfg = hybrid_mlp_config_from_profile(profile_name)
 
     overrides = {}
     for name in (
@@ -395,15 +464,18 @@ def _cfg_from_args(args):
         val = getattr(args, name, None)
         if val is not None:
             overrides[name] = val
-    return replace(cfg, **overrides) if overrides else cfg
+    if overrides:
+        cfg = replace(cfg, **overrides)
+    return cfg, feature_source
 
 
 def main():
     parser = build_argparser()
     args = parser.parse_args()
     print(f"[ARGS] {vars(args)}")
-    cfg = _cfg_from_args(args)
-    run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=args.device)
+    cfg, feature_source = _cfg_from_args(args)
+    run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=args.device,
+            feature_source=feature_source)
 
 
 if __name__ == "__main__":

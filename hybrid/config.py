@@ -51,8 +51,7 @@ class HybridPathConfig:
 class HybridMLPConfig:
     seed: int = 234
     batch_size: int = 64
-    # v14: возврат к v3-проверенному lr=1e-4 (3e-4 разрушал обучение на custom)
-    learning_rate: float = 1e-4
+    learning_rate: float = 3e-4
     patience: int = 8
     weight_decay: float = 1e-2
     epochs: int = 40
@@ -68,19 +67,24 @@ class HybridMLPConfig:
 
     mixup_alpha: float = 0.2
 
-    # v14: мягкий warmup — 2 эпохи вместо 5
-    warmup_epochs: int = 2
+    warmup_epochs: int = 5
     max_grad_norm: float = 1.0
 
 
 # -----------------------------------------------------------------------------
-# MLP-профили. Дефолт = noisy (проверенный, даёт 0.51 на custom_embedder).
-# v14: noisy откатили к v3-настройкам — lr=1e-4, мягкий warmup 2 эпохи.
+# MLP-профили.
+#   - "noisy": для sparse hybrid (78507-dim), агрессивный (focal+mixup+LS).
+#             Это твой проверенный 0.511 на v3.
+#   - "clean": лёгкий, для быстрых проверок.
+#   - "custom": экспериментальный.
+#   - "bert_only" (НОВОЕ): для dense bert-only (1024-dim, L2-norm). Мягкий, без focal/mixup/LS.
+#             Гиперпараметры подобраны под распределение фич, на которых классика
+#             даёт 0.54+ (LogReg/LinearSVC на bert_only C=0.05).
 # -----------------------------------------------------------------------------
 HYBRID_MLP_PROFILES = {
     "noisy": dict(
         batch_size=64,
-        learning_rate=1e-4,          # было 3e-4 → разрушало обучение
+        learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,
         patience=8,
@@ -91,12 +95,12 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.05,
         mixup_alpha=0.2,
         use_class_weight=True,
-        warmup_epochs=2,             # было 5 → слишком долгий разгон
+        warmup_epochs=5,
         max_grad_norm=1.0,
     ),
     "clean": dict(
         batch_size=64,
-        learning_rate=1e-4,          # было 2e-4
+        learning_rate=2e-4,
         weight_decay=5e-3,
         epochs=30,
         patience=6,
@@ -107,13 +111,12 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.0,
         mixup_alpha=0.0,
         use_class_weight=False,
-        warmup_epochs=2,             # было 3
+        warmup_epochs=3,
         max_grad_norm=1.0,
     ),
-    # экспериментальный — пока с дефолта снят
     "custom": dict(
         batch_size=64,
-        learning_rate=1e-4,          # было 3e-4
+        learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,
         patience=10,
@@ -124,11 +127,34 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.03,
         mixup_alpha=0.1,
         use_class_weight=True,
-        warmup_epochs=2,             # было 5
+        warmup_epochs=5,
+        max_grad_norm=1.0,
+    ),
+    # НОВОЕ в v15: для bert_only фичей (1024-dim dense, L2-norm).
+    # Мягкий профиль: без focal/mixup/LS — данных мало, агрессивная регуляризация
+    # ломает обучение. Class_weight=balanced. lr=1e-4 (ниже, чем у noisy, потому
+    # что dense L2-norm фичи дают более крутые градиенты).
+    "bert_only": dict(
+        batch_size=64,
+        learning_rate=1e-4,
+        weight_decay=5e-3,
+        epochs=40,
+        patience=10,
+        hidden_dim=512,
+        num_blocks=2,
+        dropout=0.3,
+        focal_gamma=0.0,
+        label_smoothing=0.0,
+        mixup_alpha=0.0,
+        use_class_weight=True,
+        warmup_epochs=3,
         max_grad_norm=1.0,
     ),
 }
 
+# Глобальный дефолт (используется только если features не указано).
+# Оставлен "noisy" ради backward compat _cfg_from_args; реальный выбор делает
+# default_mlp_profile_for_features в main.py.
 DEFAULT_HYBRID_MLP_PROFILE = "noisy"
 
 
@@ -148,8 +174,25 @@ def hybrid_mlp_config_from_profile(profile: str = DEFAULT_HYBRID_MLP_PROFILE, **
 
 def autodetect_mlp_profile(vecdir: str) -> str:
     """
-    Главное правило: custom_embedder — приоритет. На custom лучше всех работает 'noisy'
-    (это твой проверенный 0.511). На baseline тоже 'noisy' (для него она и задумана).
-    Так что автодетект — это всегда 'noisy', оставлено только для совместимости.
+    Оставлено для обратной совместимости. Сейчас выбор профиля делает
+    default_mlp_profile_for_features.
     """
     return DEFAULT_HYBRID_MLP_PROFILE
+
+
+# Допустимые источники фич для MLP.
+HYBRID_MLP_FEATURE_SOURCES = ("bert_only", "hybrid")
+DEFAULT_HYBRID_MLP_FEATURE_SOURCE = "bert_only"
+
+
+def default_mlp_profile_for_features(feature_source: str) -> str:
+    """
+    Дефолтный профиль зависит от источника фич:
+      - bert_only → 'bert_only' (мягкий, под dense L2-norm)
+      - hybrid    → 'noisy'     (агрессивный, под sparse 78507-dim)
+    """
+    if feature_source == "bert_only":
+        return "bert_only"
+    if feature_source == "hybrid":
+        return "noisy"
+    raise ValueError(f"Unknown feature_source {feature_source!r}")

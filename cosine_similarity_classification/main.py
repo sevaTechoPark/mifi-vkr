@@ -30,6 +30,8 @@ from cosine_similarity_classification.config import (
     CENTROID_TRIM_MODE,
     CENTROID_TRIM_POWER,
     CENTROID_TRIM_POWER_SWEEP,
+    CENTROID_TRIM_MODE_SWEEP,
+    CENTROID_TRIM_RATIO_SWEEP,
     CENTROID_REFINE_ITERS,
     ENSEMBLE_ALPHA,
     ENSEMBLE_ALPHA_SWEEP,
@@ -88,14 +90,21 @@ def _parse_list(s, cast):
 # -----------------------------------------------------------------------------
 # Per-method runners
 # -----------------------------------------------------------------------------
-def _run_centroid_sweep(train_embs, train_labels, test_embs, test_df, label_col,
-                        test_has_labels, *,
-                        trim_ratio, trim_mode, trim_power, trim_power_sweep, refine_iters):
+def _run_centroid_full_sweep(train_embs, train_labels, test_embs, test_df, label_col,
+                              test_has_labels, *,
+                              trim_ratio, trim_mode, trim_power,
+                              trim_power_sweep, trim_mode_sweep, trim_ratio_sweep,
+                              refine_iters):
     """
-    v17: sweep по trim_power. Выбираем по macro_f1.
+    v18: полный sweep по (mode, ratio, power) для centroid. Выбираем лучший по f1.
+    Всего точек = len(modes) × len(ratios) × len(powers) [для soft]
+                + len(modes) × len(ratios) × 1 [для hard, power не влияет]
     """
     power_list = _parse_list(trim_power_sweep, float) or [float(trim_power)]
+    mode_list = _parse_list(trim_mode_sweep, str) or [str(trim_mode)]
+    ratio_list = _parse_list(trim_ratio_sweep, float) or [float(trim_ratio)]
 
+    # hard режим не использует power → для него считаем только один раз
     sweep_results = []
     best = None
     best_f1 = -1.0
@@ -104,30 +113,37 @@ def _run_centroid_sweep(train_embs, train_labels, test_embs, test_df, label_col,
         from sklearn.metrics import f1_score, balanced_accuracy_score
         y_true_tmp = test_df[label_col].astype(str).values
 
-    for tp in power_list:
-        pred_labels, pred_scores, classes, centroids = predict_centroid(
-            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
-            trim_ratio=float(trim_ratio),
-            trim_mode=trim_mode,
-            trim_power=float(tp),
-            refine_iters=int(refine_iters),
-        )
-        item = {
-            "trim_power": float(tp),
-            "pred_labels": pred_labels,
-            "pred_scores": pred_scores,
-            "classes": classes,
-            "centroids": centroids,
-        }
-        if test_has_labels:
-            ba = balanced_accuracy_score(y_true_tmp, pred_labels)
-            f1 = f1_score(y_true_tmp, pred_labels, average="macro", zero_division=0)
-            item["balanced_accuracy"] = round(float(ba), 6)
-            item["macro_f1"] = round(float(f1), 6)
-            if f1 > best_f1:
-                best_f1 = f1
-                best = item
-        sweep_results.append(item)
+    # Перебираем (mode, ratio, power)
+    for mode in mode_list:
+        for ratio in ratio_list:
+            # Для hard режима power не нужен — берём один (любой, например 1.0)
+            powers_for_this_mode = [1.0] if mode == "hard" else power_list
+            for tp in powers_for_this_mode:
+                pred_labels, pred_scores, classes, centroids = predict_centroid(
+                    train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
+                    trim_ratio=float(ratio),
+                    trim_mode=mode,
+                    trim_power=float(tp),
+                    refine_iters=int(refine_iters),
+                )
+                item = {
+                    "trim_mode": str(mode),
+                    "trim_ratio": float(ratio),
+                    "trim_power": float(tp),
+                    "pred_labels": pred_labels,
+                    "pred_scores": pred_scores,
+                    "classes": classes,
+                    "centroids": centroids,
+                }
+                if test_has_labels:
+                    ba = balanced_accuracy_score(y_true_tmp, pred_labels)
+                    f1 = f1_score(y_true_tmp, pred_labels, average="macro", zero_division=0)
+                    item["balanced_accuracy"] = round(float(ba), 6)
+                    item["macro_f1"] = round(float(f1), 6)
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best = item
+                sweep_results.append(item)
 
     if best is None:
         best = sweep_results[0]
@@ -140,27 +156,41 @@ def _run_centroid_sweep(train_embs, train_labels, test_embs, test_df, label_col,
     extra = {
         "num_classes": int(len(classes)),
         "centroid_dim": int(centroids.shape[1]),
-        "centroid_trim_ratio": float(trim_ratio),
-        "centroid_trim_mode": trim_mode,
+        "centroid_trim_mode_best": str(best["trim_mode"]),
+        "centroid_trim_ratio_best": float(best["trim_ratio"]),
         "centroid_trim_power_best": float(best["trim_power"]),
+        "centroid_trim_mode_sweep": mode_list,
+        "centroid_trim_ratio_sweep": ratio_list,
         "centroid_trim_power_sweep": power_list,
         "centroid_refine_iters": int(refine_iters),
         "sweep_table": [],
     }
 
     if test_has_labels:
-        print(f"--- {_pretty_method('centroid')} sweep (trim_power) ---")
-        for item in sweep_results:
+        print(f"--- {_pretty_method('centroid')} sweep (mode × ratio × power) ---")
+        # Сортируем по f1 для удобства чтения
+        sorted_sweep = sorted(
+            sweep_results,
+            key=lambda r: r.get("macro_f1", 0.0),
+            reverse=True,
+        )
+        for item in sorted_sweep:
             ba = item.get("balanced_accuracy", 0.0)
             f1 = item.get("macro_f1", 0.0)
-            mark = " ← best" if item["trim_power"] == best["trim_power"] else ""
-            print(f"  trim_power={item['trim_power']:>4.1f}: "
+            is_best = (item["trim_mode"] == best["trim_mode"]
+                       and item["trim_ratio"] == best["trim_ratio"]
+                       and item["trim_power"] == best["trim_power"])
+            mark = " ← best" if is_best else ""
+            print(f"  mode={item['trim_mode']:<4} ratio={item['trim_ratio']:.2f} "
+                  f"power={item['trim_power']:>4.1f}: "
                   f"balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
             extra["sweep_table"].append({
+                "trim_mode": str(item["trim_mode"]),
+                "trim_ratio": float(item["trim_ratio"]),
                 "trim_power": float(item["trim_power"]),
                 "balanced_accuracy": float(item.get("balanced_accuracy", 0.0)),
                 "macro_f1": float(item.get("macro_f1", 0.0)),
-                "is_best": item["trim_power"] == best["trim_power"],
+                "is_best": is_best,
             })
 
     return pred_labels, pred_scores, extra
@@ -225,9 +255,6 @@ def _run_centroid_nn_sweep(train_embs, train_labels, test_embs, test_df, label_c
                             trim_ratio, trim_mode, trim_power, refine_iters,
                             knn_k, knn_temperature,
                             ensemble_alpha, ensemble_alpha_sweep):
-    """
-    v17: sweep по ensemble_alpha. Выбираем по macro_f1.
-    """
     alpha_list = _parse_list(ensemble_alpha_sweep, float) or [float(ensemble_alpha)]
 
     sweep_results = []
@@ -342,6 +369,8 @@ def run_from_params(
     centroid_trim_mode: str = CENTROID_TRIM_MODE,
     centroid_trim_power: float = CENTROID_TRIM_POWER,
     centroid_trim_power_sweep: str = CENTROID_TRIM_POWER_SWEEP,
+    centroid_trim_mode_sweep: str = CENTROID_TRIM_MODE_SWEEP,
+    centroid_trim_ratio_sweep: str = CENTROID_TRIM_RATIO_SWEEP,
     centroid_refine_iters: int = CENTROID_REFINE_ITERS,
     ensemble_alpha: float = ENSEMBLE_ALPHA,
     ensemble_alpha_sweep: str = ENSEMBLE_ALPHA_SWEEP,
@@ -390,11 +419,13 @@ def run_from_params(
         pretty = _pretty_method(m)
         print(f"\n=== Method: {pretty} ===")
         if m == "centroid":
-            pred_labels, pred_scores, extra = _run_centroid_sweep(
+            pred_labels, pred_scores, extra = _run_centroid_full_sweep(
                 train_embs, train_labels, test_embs, test_df, label_col, test_has_labels,
                 trim_ratio=centroid_trim_ratio, trim_mode=centroid_trim_mode,
                 trim_power=centroid_trim_power,
                 trim_power_sweep=centroid_trim_power_sweep,
+                trim_mode_sweep=centroid_trim_mode_sweep,
+                trim_ratio_sweep=centroid_trim_ratio_sweep,
                 refine_iters=centroid_refine_iters,
             )
         elif m == "nearest":
@@ -553,6 +584,10 @@ def build_argparser():
     parser.add_argument("--centroid-trim-power", type=float, default=CENTROID_TRIM_POWER)
     parser.add_argument("--centroid-trim-power-sweep", type=str,
                         default=CENTROID_TRIM_POWER_SWEEP)
+    parser.add_argument("--centroid-trim-mode-sweep", type=str,
+                        default=CENTROID_TRIM_MODE_SWEEP)
+    parser.add_argument("--centroid-trim-ratio-sweep", type=str,
+                        default=CENTROID_TRIM_RATIO_SWEEP)
     parser.add_argument("--centroid-refine-iters", type=int, default=CENTROID_REFINE_ITERS)
 
     parser.add_argument("--ensemble-alpha", type=float, default=ENSEMBLE_ALPHA)
@@ -592,6 +627,8 @@ def main():
         centroid_trim_mode=args.centroid_trim_mode,
         centroid_trim_power=args.centroid_trim_power,
         centroid_trim_power_sweep=args.centroid_trim_power_sweep,
+        centroid_trim_mode_sweep=args.centroid_trim_mode_sweep,
+        centroid_trim_ratio_sweep=args.centroid_trim_ratio_sweep,
         centroid_refine_iters=args.centroid_refine_iters,
         ensemble_alpha=args.ensemble_alpha,
         ensemble_alpha_sweep=args.ensemble_alpha_sweep,

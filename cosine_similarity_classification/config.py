@@ -1,7 +1,5 @@
 """
 Конфиг модуля cosine_similarity_classification.
-
-Источник правды по гиперпараметрам эмбеддера — bert_embeddings.config.EmbeddingConfig.
 """
 
 from bert_embeddings.config import EmbeddingConfig
@@ -13,7 +11,6 @@ BASE_MODEL_NAME: str = _emb.base_model_name
 TEXT_COLUMN: str = "text"
 LABEL_COLUMN: str = "label"
 
-# Дефолтный метод. Доступно: "all" | "centroid" | "nearest" | "centroid_nn"
 METHOD: str = "all"
 
 MAX_LENGTH: int = _emb.max_length
@@ -33,7 +30,6 @@ MODEL_DIR: str = ""
 # -----------------------------------------------------------------------------
 KNN_K: int = 5
 KNN_TEMPERATURE: float = 0.1
-# v17: расширенный sweep — добавлены k=21, k=31 и более тонкий шаг по T
 KNN_K_SWEEP: str = "1,3,5,7,9,11,15,21,31"
 KNN_T_SWEEP: str = "0.03,0.05,0.1,0.15,0.2,0.3"
 
@@ -45,13 +41,13 @@ CENTROID_TRIM_MODE: str = "soft"
 CENTROID_TRIM_POWER: float = 4.0
 CENTROID_REFINE_ITERS: int = 1
 
-# v17: sweep по centroid_trim_power для centroid-метода
-# (пустая строка → используется одно значение CENTROID_TRIM_POWER)
 CENTROID_TRIM_POWER_SWEEP: str = "2,4,6,8"
+# v18: добавлены sweep по trim_mode и trim_ratio (исторический максимум был на hard, 0.15)
+CENTROID_TRIM_MODE_SWEEP: str = "hard,soft"
+CENTROID_TRIM_RATIO_SWEEP: str = "0,0.1,0.15,0.2"
 
 # -----------------------------------------------------------------------------
 # centroid_nn ensemble
 # -----------------------------------------------------------------------------
 ENSEMBLE_ALPHA: float = 0.5
-# v17: sweep по alpha для centroid_nn
 ENSEMBLE_ALPHA_SWEEP: str = "0.3,0.4,0.5,0.6,0.7"

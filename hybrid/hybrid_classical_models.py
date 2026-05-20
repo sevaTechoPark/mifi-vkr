@@ -2,6 +2,7 @@ import os
 import json
 import argparse
 import warnings
+from datetime import datetime
 from typing import Tuple, Dict, Any
 
 import numpy as np
@@ -19,6 +20,48 @@ from sklearn.ensemble import StackingClassifier, VotingClassifier
 
 
 # -----------------------------------------------------------------------------
+# v16: красивые имена моделей. Источники остаются snake_case.
+# -----------------------------------------------------------------------------
+PRETTY_NAMES = {
+    "linear_svc": "LinearSVC",
+    "linear_svc_l1": "LinearSVC-L1",
+    "linear_svc_calibrated_sigmoid": "LinearSVC-CalibratedSigmoid",
+    "linear_svc_calibrated_isotonic": "LinearSVC-CalibratedIsotonic",
+    "logreg": "LogisticRegression",
+    "logreg_l1": "LogisticRegression-L1",
+    "ridge_classifier": "RidgeClassifier",
+    "sgd_hinge": "SGDClassifier-Hinge",
+    "svc_rbf": "SVC-RBF",
+    "multinomial_nb": "MultinomialNB",
+    "complement_nb": "ComplementNB",
+    "voting_soft_top3": "VotingClassifier-SoftTop3",
+    "stacking_bert_only": "StackingClassifier-BertOnly",
+}
+
+
+def _pretty(model_key: str) -> str:
+    """linear_svc → LinearSVC; linear_svc_l1 → LinearSVC-L1; etc."""
+    return PRETTY_NAMES.get(model_key, model_key)
+
+
+def _fmt_model(model_key: str, tag: str = "", C: float | None = None, extra: str = "") -> str:
+    """
+    Финальное имя модели:
+      'LinearSVC[bert_only] C=3.0'
+      'LogisticRegression-L1[hybrid] C=1.0'
+      'StackingClassifier-BertOnly[bert_only]'
+    """
+    pretty = _pretty(model_key)
+    name = f"{pretty}[{tag}]" if tag else pretty
+    parts = [name]
+    if C is not None:
+        parts.append(f"C={C}")
+    if extra:
+        parts.append(extra)
+    return " ".join(parts)
+
+
+# -----------------------------------------------------------------------------
 # Eval helpers
 # -----------------------------------------------------------------------------
 def _eval(y_true, y_pred):
@@ -32,7 +75,8 @@ def _eval(y_true, y_pred):
         }
 
 
-def _safe_fit_eval(name, model, Xtr, ytr, Xte, yte, results, tag=""):
+def _safe_fit_eval(model_key, model, Xtr, ytr, Xte, yte, results, tag="", C=None, extra=""):
+    full_name = _fmt_model(model_key, tag=tag, C=C, extra=extra)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=ConvergenceWarning)
@@ -41,15 +85,22 @@ def _safe_fit_eval(name, model, Xtr, ytr, Xte, yte, results, tag=""):
             model.fit(Xtr, ytr)
         pred = model.predict(Xte)
         metrics = _eval(yte, pred)
-        full_name = f"{name}[{tag}]" if tag else name
         print(f"  {full_name}: {metrics}")
-        results.append({"model": full_name, "feature_source": tag, **metrics})
+        results.append({
+            "model": full_name,
+            "model_key": model_key,
+            "feature_source": tag,
+            "C": C,
+            **metrics,
+        })
         return model, metrics
     except Exception as e:
-        full_name = f"{name}[{tag}]" if tag else name
         print(f"  {full_name}: FAILED ({type(e).__name__}: {e})")
         results.append({
-            "model": full_name, "feature_source": tag,
+            "model": full_name,
+            "model_key": model_key,
+            "feature_source": tag,
+            "C": C,
             "balanced_accuracy": None, "macro_f1": None,
             "error": f"{type(e).__name__}: {e}",
         })
@@ -68,14 +119,15 @@ def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     for C in c_grid:
         model = LinearSVC(C=C, **base_kwargs)
         m, metrics = _safe_fit_eval(
-            f"linear_svc_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+            "linear_svc", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
         if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
             best = (C, m, metrics)
     if best[0] is not None:
-        print(f"  ★ best linear_svc[{tag}]: C={best[0]} → {best[2]}")
+        print(f"  ★ best LinearSVC[{tag}]: C={best[0]} → {best[2]}")
         results.append({
-            "model": f"linear_svc_best[{tag}]",
+            "model": _fmt_model("linear_svc", tag=tag, C=best[0], extra="★best"),
+            "model_key": "linear_svc_best",
             "feature_source": tag,
             "best_C": best[0],
             **best[2],
@@ -95,12 +147,12 @@ def _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
             kwargs["class_weight"] = class_weight
         model = LinearSVC(**kwargs)
         m, metrics = _safe_fit_eval(
-            f"linear_svc_l1_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+            "linear_svc_l1", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
         if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
             best = (C, m, metrics)
     if best[0] is not None:
-        print(f"  ★ best linear_svc_l1[{tag}]: C={best[0]} → {best[2]}")
+        print(f"  ★ best LinearSVC-L1[{tag}]: C={best[0]} → {best[2]}")
     return best
 
 
@@ -115,14 +167,15 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
             base_kwargs["class_weight"] = class_weight
         model = LogisticRegression(**base_kwargs)
         m, metrics = _safe_fit_eval(
-            f"logreg_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+            "logreg", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
         if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
             best = (C, m, metrics)
     if best[0] is not None:
-        print(f"  ★ best logreg[{tag}]: C={best[0]} → {best[2]}")
+        print(f"  ★ best LogisticRegression[{tag}]: C={best[0]} → {best[2]}")
         results.append({
-            "model": f"logreg_best[{tag}]",
+            "model": _fmt_model("logreg", tag=tag, C=best[0], extra="★best"),
+            "model_key": "logreg_best",
             "feature_source": tag,
             "best_C": best[0],
             **best[2],
@@ -132,7 +185,7 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 
 def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     """
-    v14: используем penalty='elasticnet' + l1_ratio=1.0 — новый API sklearn 1.8+,
+    v14: penalty='elasticnet' + l1_ratio=1.0 — новый API sklearn 1.8+,
     эквивалентно penalty='l1', но без FutureWarning.
     """
     best = (None, None, None)
@@ -145,12 +198,12 @@ def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
             kwargs["class_weight"] = class_weight
         model = LogisticRegression(**kwargs)
         m, metrics = _safe_fit_eval(
-            f"logreg_l1_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+            "logreg_l1", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
         if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
             best = (C, m, metrics)
     if best[0] is not None:
-        print(f"  ★ best logreg_l1[{tag}]: C={best[0]} → {best[2]}")
+        print(f"  ★ best LogisticRegression-L1[{tag}]: C={best[0]} → {best[2]}")
     return best
 
 
@@ -165,10 +218,8 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
     best_lr = _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
 
     if include_l1:
-        # l1-варианты часто полезны как другая регуляризация
         _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
         if not sp.issparse(Xtr):
-            # saga на больших sparse очень медленно — только для dense (bert_only)
             _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
 
     # Calibrated SVC (sigmoid + isotonic) на лучшем C
@@ -181,10 +232,11 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
             if class_weight is not None:
                 cal_kwargs["class_weight"] = class_weight
             for method in ("sigmoid", "isotonic"):
+                model_key = f"linear_svc_calibrated_{method}"
                 _safe_fit_eval(
-                    f"linear_svc_calibrated_{method}_C{best_svc[0]}",
+                    model_key,
                     CalibratedClassifierCV(LinearSVC(**cal_kwargs), method=method, cv=safe_cv),
-                    Xtr, ytr, Xte, yte, results, tag=tag,
+                    Xtr, ytr, Xte, yte, results, tag=tag, C=best_svc[0],
                 )
 
     # RidgeClassifier
@@ -195,8 +247,7 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
                    Xtr, ytr, Xte, yte, results, tag=tag)
 
     # SGD hinge
-    sgd_kwargs = {"random_state": 42, "max_iter": 2000, "alpha": 1e-5,
-                  "loss": "hinge"}
+    sgd_kwargs = {"random_state": 42, "max_iter": 2000, "alpha": 1e-5, "loss": "hinge"}
     if class_weight is not None:
         sgd_kwargs["class_weight"] = class_weight
     _safe_fit_eval("sgd_hinge", SGDClassifier(**sgd_kwargs),
@@ -207,10 +258,10 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
         rbf_kwargs = {"random_state": 42, "kernel": "rbf", "C": 4.0, "gamma": "scale"}
         if class_weight is not None:
             rbf_kwargs["class_weight"] = class_weight
-        _safe_fit_eval("svc_rbf_C4", SVC(**rbf_kwargs),
-                       Xtr, ytr, Xte, yte, results, tag=tag)
+        _safe_fit_eval("svc_rbf", SVC(**rbf_kwargs),
+                       Xtr, ytr, Xte, yte, results, tag=tag, C=4.0)
 
-    # VotingClassifier на топ-3 моделях (только если есть best_svc и best_lr)
+    # VotingClassifier на топ-3 моделях
     if include_voting and best_svc[0] is not None and best_lr[0] is not None:
         class_counts = pd.Series(ytr).value_counts()
         min_cc = int(class_counts.min())
@@ -234,7 +285,7 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
                 estimators=[("svc", svc_cal), ("lr", lr), ("ridge", ridge_cal)],
                 voting="soft", n_jobs=1,
             )
-            _safe_fit_eval(f"voting_soft_top3", voter,
+            _safe_fit_eval("voting_soft_top3", voter,
                            Xtr, ytr, Xte, yte, results, tag=tag)
 
     return best_svc, best_lr
@@ -288,7 +339,7 @@ def _run_stacking(X_bert_tr, X_bert_te, ytr, yte, results, best_C_bert, class_we
 # -----------------------------------------------------------------------------
 def run_classical(
     vecdir: str,
-    class_weight: str | None = "balanced",   # v14: default 'balanced' (было None)
+    class_weight: str | None = "balanced",
     include_tfidf_only: bool = True,
     feature_sources: Tuple[str, ...] = ("bert_only", "hybrid", "tfidf_only"),
     c_grid: Tuple[float, ...] = (0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0),
@@ -298,14 +349,13 @@ def run_classical(
     """
     Полный classical-прогон. Cosine-методы убраны — для них есть отдельный модуль.
 
-    v14: class_weight по умолчанию 'balanced' — на min_class=1 это критично для macro_f1.
-    Передай явно class_weight=None для прежнего поведения.
+    v14+: class_weight по умолчанию 'balanced' — на min_class=1 это критично для macro_f1.
+    v16: красивые имена моделей в логах и JSON; имя файла включает basename(vecdir) + datetime.
 
     feature_sources:
       - 'bert_only'   → X_*_bert.npy (L2-нормированный, dense, dim=1024)
       - 'hybrid'      → X_*_hybrid_noL2.npz (per-block L2, без финальной L2)
       - 'tfidf_only'  → строит TF-IDF на лету из texts_*.csv (NB + linear suite)
-    c_grid: расширенный grid по C (was 0.1-3, now 0.05-5)
     """
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
@@ -420,7 +470,12 @@ def run_classical(
         "top_model": valid[0] if valid else None,
         "results": results,
     }
-    out_path = os.path.join(vecdir, "classical_results.json")
+
+    # v16: имя файла = classical-results-<basename(vecdir)>-<YYYY-MM-DDTHH:MM>.json
+    vec_base = os.path.basename(os.path.normpath(vecdir)) or "vecdir"
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    out_name = f"classical-results-{vec_base}-{stamp}.json"
+    out_path = os.path.join(vecdir, out_name)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"\nSaved: {out_path}")
@@ -430,7 +485,6 @@ def run_classical(
 def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
-    # v14: default='balanced' (раньше None)
     parser.add_argument("--class-weight", default="balanced",
                         choices=["balanced", "none"], nargs="?")
     parser.add_argument("--no-tfidf-only", action="store_true")

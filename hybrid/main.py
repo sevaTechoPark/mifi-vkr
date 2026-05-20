@@ -106,8 +106,14 @@ def build_parser():
         "classical", help="Run classical models on hybrid vectors",
     )
     classical_parser.add_argument("--vecdir", required=True)
-    classical_parser.add_argument("--class-weight", default=None,
-                                  choices=[None, "balanced"], nargs="?")
+    # v16 КРИТИЧЕСКИЙ ФИКС: default был None → перебивал function default 'balanced'
+    # и ронял macro_f1 на min_class=1. Возвращаем 'balanced'.
+    classical_parser.add_argument(
+        "--class-weight", default="balanced",
+        choices=["balanced", "none"], nargs="?",
+        help="Балансировка классов. По умолчанию 'balanced' "
+             "(критично при min_class=1). Передай 'none' чтобы отключить.",
+    )
     classical_parser.add_argument("--no-tfidf-only", action="store_true")
     classical_parser.add_argument("--feature-sources", default=None)
     classical_parser.add_argument("--c-grid", default=None)
@@ -181,9 +187,15 @@ def main():
     elif args.command == "classical":
         sources = tuple(s.strip() for s in (args.feature_sources or "bert_only,hybrid,tfidf_only").split(",") if s.strip())
         c_grid = tuple(float(c) for c in (args.c_grid or "0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0").split(",") if c.strip())
+        # v16: нормализуем 'none' → None, всё остальное передаём как есть.
+        cw_arg = args.class_weight
+        if cw_arg is None or (isinstance(cw_arg, str) and cw_arg.lower() == "none"):
+            cw = None
+        else:
+            cw = cw_arg
         run_classical(
             args.vecdir,
-            class_weight=args.class_weight,
+            class_weight=cw,
             include_tfidf_only=(not args.no_tfidf_only) and ("tfidf_only" in sources),
             feature_sources=sources,
             c_grid=c_grid,

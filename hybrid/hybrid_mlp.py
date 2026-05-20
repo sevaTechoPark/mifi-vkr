@@ -3,6 +3,7 @@ import json
 import argparse
 import warnings
 import random
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import balanced_accuracy_score, f1_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, normalize
 from sklearn.utils.class_weight import compute_class_weight
 
 from .config import (
@@ -179,17 +180,35 @@ def _resolve_device(device):
     return torch.device(name)
 
 
+# -----------------------------------------------------------------------------
+# v16: sanity-checks для входных фичей
+# -----------------------------------------------------------------------------
+def _sanitize_features(X: np.ndarray, name: str) -> np.ndarray:
+    """
+    Защита от NaN/Inf, которые ронят MLP в NaN-loss сразу же.
+    Заодно отчёт о статистиках.
+    """
+    X = np.asarray(X, dtype=np.float32)
+    n_nan = int(np.isnan(X).sum())
+    n_inf = int(np.isinf(X).sum())
+    if n_nan or n_inf:
+        print(f"[hybrid_mlp][WARN] {name}: NaN={n_nan}, Inf={n_inf} — заменяю на 0.0")
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    rms = float(np.sqrt(np.mean(X.astype(np.float64) ** 2))) if X.size else 0.0
+    print(f"[hybrid_mlp] {name}: shape={X.shape} min={X.min():.4f} "
+          f"max={X.max():.4f} mean={X.mean():.4f} rms={rms:.4f}")
+    return X
+
+
 def _load_features(vecdir: str, feature_source: str):
     """
     Загружаем фичи в зависимости от источника.
 
-    feature_source='bert_only': X_{train,test}_bert.npy (1024-dim dense, L2-norm).
-        Это те же фичи, на которых классическая LogReg/LinearSVC дают 0.54+.
-        ОБЯЗАТЕЛЬНЫЕ файлы.
-
-    feature_source='hybrid': X_{train,test}_hybrid.npz (sparse, ≈78507-dim).
+    feature_source='bert_only': X_{train,test}_bert.npy (1024-dim dense).
+        v16: явно делаем L2-нормировку и sanity-check (NaN/Inf → 0). На некоторых
+        датасетах сырые .npy не нормированы → ронят MLP в NaN-loss.
+    feature_source='hybrid': X_{train,test}_hybrid.npz (sparse).
         Если есть X_{train,test}_dense.npy (SVD-сжатые) — используем их.
-        Этот путь сохранён ради backward compat.
     """
     if feature_source == "bert_only":
         bert_train = os.path.join(vecdir, "X_train_bert.npy")
@@ -204,7 +223,12 @@ def _load_features(vecdir: str, feature_source: str):
             )
         X_train = np.load(bert_train).astype(np.float32)
         X_test = np.load(bert_test).astype(np.float32)
-        print(f"[hybrid_mlp] features='bert_only' (dense L2-norm) dim={X_train.shape[1]}")
+        # v16: sanity + явная L2-норма
+        X_train = _sanitize_features(X_train, "X_train_bert(raw)")
+        X_test = _sanitize_features(X_test, "X_test_bert(raw)")
+        X_train = normalize(X_train, norm="l2", axis=1).astype(np.float32)
+        X_test = normalize(X_test, norm="l2", axis=1).astype(np.float32)
+        print(f"[hybrid_mlp] features='bert_only' (dense, L2-renorm) dim={X_train.shape[1]}")
         return X_train, X_test
 
     if feature_source == "hybrid":
@@ -218,6 +242,9 @@ def _load_features(vecdir: str, feature_source: str):
             X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz")).astype(np.float32).toarray()
             X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz")).astype(np.float32).toarray()
             print(f"[hybrid_mlp] features='hybrid' (SPARSE→DENSE) dim={X_train.shape[1]}")
+        # v16: sanity и для hybrid (NaN могли пролезть через scaler с zero-variance столбцами)
+        X_train = _sanitize_features(X_train, "X_train_hybrid")
+        X_test = _sanitize_features(X_test, "X_test_hybrid")
         return X_train, X_test
 
     raise ValueError(
@@ -289,6 +316,10 @@ def run_mlp(
         dropout=cfg.dropout,
     ).to(device)
 
+    # v16: красивое имя модели для логов
+    model_name = f"StrongMLP[{feature_source}]"
+    print(f"\n=== {model_name} | dim={X_train.shape[1]} | classes={num_classes} ===")
+
     cw_device = class_weights_t.to(device) if class_weights_t is not None else None
     criterion = FocalLoss(alpha=cw_device, gamma=cfg.focal_gamma, label_smoothing=cfg.label_smoothing)
     optimizer = torch.optim.AdamW(
@@ -325,6 +356,7 @@ def run_mlp(
         _set_lr(epoch)
         model.train()
         epoch_losses = []
+        nan_batches = 0
         for xb, yb in train_loader:
             xb = xb.to(device, non_blocking=True)
             yb = yb.to(device, non_blocking=True)
@@ -342,6 +374,11 @@ def run_mlp(
                 logits = model(xb)
                 loss = criterion(logits, yb)
 
+            # v16: страховка от NaN-loss — пропускаем батч (а не оптимизируем шаг с NaN)
+            if not torch.isfinite(loss):
+                nan_batches += 1
+                continue
+
             loss.backward()
             if max_grad_norm and max_grad_norm > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
@@ -352,8 +389,9 @@ def run_mlp(
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
         current_lr = optimizer.param_groups[0]["lr"]
         phase = "warmup" if epoch < warmup_epochs else "cosine"
+        nan_tag = f" nan_batches={nan_batches}" if nan_batches else ""
         print(f"epoch={epoch + 1} phase={phase} lr={current_lr:.2e} "
-              f"train_loss={mean_loss:.6f} metrics={metrics}")
+              f"train_loss={mean_loss:.6f} metrics={metrics}{nan_tag}")
 
         if metrics["macro_f1"] > best_f1:
             best_f1 = metrics["macro_f1"]
@@ -367,11 +405,13 @@ def run_mlp(
                 break
 
     results = {
+        "model": model_name,
+        "model_key": "strong_mlp",
+        "feature_source": feature_source,
         "best_epoch": best_epoch,
         "best_macro_f1": best_f1,
         "best_metrics": best_metrics,
         "epochs_ran": epoch + 1,
-        "feature_source": feature_source,
         "batch_size": cfg.batch_size,
         "lr": cfg.learning_rate,
         "patience": cfg.patience,
@@ -392,9 +432,13 @@ def run_mlp(
     }
 
     print("\nBEST RESULT")
-    print(best_metrics)
+    print(f"  {model_name}: {best_metrics}")
 
-    out_path = os.path.join(vecdir, "mlp_results.json")
+    # v16: имя файла = mlp-results-<basename(vecdir)>-<YYYY-MM-DDTHH:MM>.json
+    vec_base = os.path.basename(os.path.normpath(vecdir)) or "vecdir"
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    out_name = f"mlp-results-{vec_base}-{stamp}.json"
+    out_path = os.path.join(vecdir, out_name)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2, default=str)
     print(f"Saved: {out_path}")
@@ -437,10 +481,6 @@ def _cfg_from_args(args):
     """
     Сборка cfg + feature_source из argparse Namespace.
     Возвращает (cfg, feature_source).
-
-    Логика выбора профиля:
-      - если --profile задан явно → используем его;
-      - иначе профиль выбирается от --features (см. default_mlp_profile_for_features).
     """
     from dataclasses import replace
 

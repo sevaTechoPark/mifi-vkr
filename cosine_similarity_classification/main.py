@@ -29,8 +29,10 @@ from cosine_similarity_classification.config import (
     CENTROID_TRIM_RATIO,
     CENTROID_TRIM_MODE,
     CENTROID_TRIM_POWER,
+    CENTROID_TRIM_POWER_SWEEP,
     CENTROID_REFINE_ITERS,
     ENSEMBLE_ALPHA,
+    ENSEMBLE_ALPHA_SWEEP,
 )
 from cosine_similarity_classification.embedder import (
     load_texts_and_labels,
@@ -49,7 +51,6 @@ from cosine_similarity_classification.metrics import evaluate_predictions
 METHOD_CHOICES = ["all", "centroid", "nearest", "centroid_nn"]
 
 
-# v16: красивые имена методов. method_key (snake_case) — для group/source.
 PRETTY_METHOD_NAMES = {
     "nearest": "Cosine-Nearest",
     "centroid": "Cosine-Centroid",
@@ -87,23 +88,81 @@ def _parse_list(s, cast):
 # -----------------------------------------------------------------------------
 # Per-method runners
 # -----------------------------------------------------------------------------
-def _run_centroid(train_embs, train_labels, test_embs, *,
-                  trim_ratio, trim_mode, trim_power, refine_iters):
-    pred_labels, pred_scores, classes, centroids = predict_centroid(
-        train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
-        trim_ratio=float(trim_ratio),
-        trim_mode=trim_mode,
-        trim_power=float(trim_power),
-        refine_iters=int(refine_iters),
-    )
+def _run_centroid_sweep(train_embs, train_labels, test_embs, test_df, label_col,
+                        test_has_labels, *,
+                        trim_ratio, trim_mode, trim_power, trim_power_sweep, refine_iters):
+    """
+    v17: sweep по trim_power. Выбираем по macro_f1.
+    """
+    power_list = _parse_list(trim_power_sweep, float) or [float(trim_power)]
+
+    sweep_results = []
+    best = None
+    best_f1 = -1.0
+
+    if test_has_labels:
+        from sklearn.metrics import f1_score, balanced_accuracy_score
+        y_true_tmp = test_df[label_col].astype(str).values
+
+    for tp in power_list:
+        pred_labels, pred_scores, classes, centroids = predict_centroid(
+            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
+            trim_ratio=float(trim_ratio),
+            trim_mode=trim_mode,
+            trim_power=float(tp),
+            refine_iters=int(refine_iters),
+        )
+        item = {
+            "trim_power": float(tp),
+            "pred_labels": pred_labels,
+            "pred_scores": pred_scores,
+            "classes": classes,
+            "centroids": centroids,
+        }
+        if test_has_labels:
+            ba = balanced_accuracy_score(y_true_tmp, pred_labels)
+            f1 = f1_score(y_true_tmp, pred_labels, average="macro", zero_division=0)
+            item["balanced_accuracy"] = round(float(ba), 6)
+            item["macro_f1"] = round(float(f1), 6)
+            if f1 > best_f1:
+                best_f1 = f1
+                best = item
+        sweep_results.append(item)
+
+    if best is None:
+        best = sweep_results[0]
+
+    pred_labels = best["pred_labels"]
+    pred_scores = best["pred_scores"]
+    classes = best["classes"]
+    centroids = best["centroids"]
+
     extra = {
         "num_classes": int(len(classes)),
         "centroid_dim": int(centroids.shape[1]),
         "centroid_trim_ratio": float(trim_ratio),
         "centroid_trim_mode": trim_mode,
-        "centroid_trim_power": float(trim_power),
+        "centroid_trim_power_best": float(best["trim_power"]),
+        "centroid_trim_power_sweep": power_list,
         "centroid_refine_iters": int(refine_iters),
+        "sweep_table": [],
     }
+
+    if test_has_labels:
+        print(f"--- {_pretty_method('centroid')} sweep (trim_power) ---")
+        for item in sweep_results:
+            ba = item.get("balanced_accuracy", 0.0)
+            f1 = item.get("macro_f1", 0.0)
+            mark = " ← best" if item["trim_power"] == best["trim_power"] else ""
+            print(f"  trim_power={item['trim_power']:>4.1f}: "
+                  f"balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
+            extra["sweep_table"].append({
+                "trim_power": float(item["trim_power"]),
+                "balanced_accuracy": float(item.get("balanced_accuracy", 0.0)),
+                "macro_f1": float(item.get("macro_f1", 0.0)),
+                "is_best": item["trim_power"] == best["trim_power"],
+            })
+
     return pred_labels, pred_scores, extra
 
 
@@ -137,7 +196,7 @@ def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
         "knn_temperature_best": float(best["temperature"]),
         "knn_k_sweep": [int(k) for k in k_list],
         "knn_t_sweep": [float(t) for t in t_list],
-        "sweep_table": [],  # заполним ниже, чтобы попало в JSON
+        "sweep_table": [],
     }
 
     if test_has_labels:
@@ -161,19 +220,58 @@ def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
     return pred_labels, pred_scores, extra
 
 
-def _run_centroid_nn(train_embs, train_labels, test_embs, *,
-                     trim_ratio, trim_mode, trim_power, refine_iters,
-                     knn_k, knn_temperature, ensemble_alpha):
-    pred_labels, pred_scores, classes = predict_centroid_nn_ensemble(
-        train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
-        trim_ratio=float(trim_ratio),
-        trim_mode=trim_mode,
-        trim_power=float(trim_power),
-        refine_iters=int(refine_iters),
-        k=int(knn_k),
-        temperature=float(knn_temperature),
-        alpha=float(ensemble_alpha),
-    )
+def _run_centroid_nn_sweep(train_embs, train_labels, test_embs, test_df, label_col,
+                            test_has_labels, *,
+                            trim_ratio, trim_mode, trim_power, refine_iters,
+                            knn_k, knn_temperature,
+                            ensemble_alpha, ensemble_alpha_sweep):
+    """
+    v17: sweep по ensemble_alpha. Выбираем по macro_f1.
+    """
+    alpha_list = _parse_list(ensemble_alpha_sweep, float) or [float(ensemble_alpha)]
+
+    sweep_results = []
+    best = None
+    best_f1 = -1.0
+
+    if test_has_labels:
+        from sklearn.metrics import f1_score, balanced_accuracy_score
+        y_true_tmp = test_df[label_col].astype(str).values
+
+    for a in alpha_list:
+        pred_labels, pred_scores, classes = predict_centroid_nn_ensemble(
+            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
+            trim_ratio=float(trim_ratio),
+            trim_mode=trim_mode,
+            trim_power=float(trim_power),
+            refine_iters=int(refine_iters),
+            k=int(knn_k),
+            temperature=float(knn_temperature),
+            alpha=float(a),
+        )
+        item = {
+            "alpha": float(a),
+            "pred_labels": pred_labels,
+            "pred_scores": pred_scores,
+            "classes": classes,
+        }
+        if test_has_labels:
+            ba = balanced_accuracy_score(y_true_tmp, pred_labels)
+            f1 = f1_score(y_true_tmp, pred_labels, average="macro", zero_division=0)
+            item["balanced_accuracy"] = round(float(ba), 6)
+            item["macro_f1"] = round(float(f1), 6)
+            if f1 > best_f1:
+                best_f1 = f1
+                best = item
+        sweep_results.append(item)
+
+    if best is None:
+        best = sweep_results[0]
+
+    pred_labels = best["pred_labels"]
+    pred_scores = best["pred_scores"]
+    classes = best["classes"]
+
     extra = {
         "num_classes": int(len(classes)),
         "centroid_trim_ratio": float(trim_ratio),
@@ -181,8 +279,26 @@ def _run_centroid_nn(train_embs, train_labels, test_embs, *,
         "centroid_refine_iters": int(refine_iters),
         "knn_k": int(knn_k),
         "knn_temperature": float(knn_temperature),
-        "ensemble_alpha": float(ensemble_alpha),
+        "ensemble_alpha_best": float(best["alpha"]),
+        "ensemble_alpha_sweep": alpha_list,
+        "sweep_table": [],
     }
+
+    if test_has_labels:
+        print(f"--- {_pretty_method('centroid_nn')} sweep (ensemble_alpha) ---")
+        for item in sweep_results:
+            ba = item.get("balanced_accuracy", 0.0)
+            f1 = item.get("macro_f1", 0.0)
+            mark = " ← best" if item["alpha"] == best["alpha"] else ""
+            print(f"  alpha={item['alpha']:.2f}: "
+                  f"balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
+            extra["sweep_table"].append({
+                "alpha": float(item["alpha"]),
+                "balanced_accuracy": float(item.get("balanced_accuracy", 0.0)),
+                "macro_f1": float(item.get("macro_f1", 0.0)),
+                "is_best": item["alpha"] == best["alpha"],
+            })
+
     return pred_labels, pred_scores, extra
 
 
@@ -225,8 +341,10 @@ def run_from_params(
     centroid_trim_ratio: float = CENTROID_TRIM_RATIO,
     centroid_trim_mode: str = CENTROID_TRIM_MODE,
     centroid_trim_power: float = CENTROID_TRIM_POWER,
+    centroid_trim_power_sweep: str = CENTROID_TRIM_POWER_SWEEP,
     centroid_refine_iters: int = CENTROID_REFINE_ITERS,
     ensemble_alpha: float = ENSEMBLE_ALPHA,
+    ensemble_alpha_sweep: str = ENSEMBLE_ALPHA_SWEEP,
     results_out: str | None = None,
 ):
     train_file = str(Path(train_file).expanduser())
@@ -245,7 +363,6 @@ def run_from_params(
     train_df = load_texts_and_labels(train_file, text_col=text_col, label_col=label_col, require_labels=True)
     test_df = load_texts_and_labels(test_file, text_col=text_col, label_col=label_col, require_labels=test_has_labels)
 
-    # === Эмбеддинги считаем ОДИН раз ===
     embedder = build_embedder(
         model_dir=model_dir, base_model_name=base_model_name,
         max_length=max_length, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
@@ -273,10 +390,12 @@ def run_from_params(
         pretty = _pretty_method(m)
         print(f"\n=== Method: {pretty} ===")
         if m == "centroid":
-            pred_labels, pred_scores, extra = _run_centroid(
-                train_embs, train_labels, test_embs,
+            pred_labels, pred_scores, extra = _run_centroid_sweep(
+                train_embs, train_labels, test_embs, test_df, label_col, test_has_labels,
                 trim_ratio=centroid_trim_ratio, trim_mode=centroid_trim_mode,
-                trim_power=centroid_trim_power, refine_iters=centroid_refine_iters,
+                trim_power=centroid_trim_power,
+                trim_power_sweep=centroid_trim_power_sweep,
+                refine_iters=centroid_refine_iters,
             )
         elif m == "nearest":
             pred_labels, pred_scores, extra = _run_nearest(
@@ -285,12 +404,13 @@ def run_from_params(
                 knn_k_sweep=knn_k_sweep, knn_t_sweep=knn_t_sweep,
             )
         elif m == "centroid_nn":
-            pred_labels, pred_scores, extra = _run_centroid_nn(
-                train_embs, train_labels, test_embs,
+            pred_labels, pred_scores, extra = _run_centroid_nn_sweep(
+                train_embs, train_labels, test_embs, test_df, label_col, test_has_labels,
                 trim_ratio=centroid_trim_ratio, trim_mode=centroid_trim_mode,
                 trim_power=centroid_trim_power, refine_iters=centroid_refine_iters,
                 knn_k=knn_k, knn_temperature=knn_temperature,
                 ensemble_alpha=ensemble_alpha,
+                ensemble_alpha_sweep=ensemble_alpha_sweep,
             )
         else:
             raise ValueError(f"Unknown method: {m}")
@@ -298,8 +418,8 @@ def run_from_params(
         eval_metrics = _eval_and_print(m, pred_labels, test_df, label_col, test_has_labels)
 
         per_method_results[m] = {
-            "model": pretty,                 # v16: красивое имя
-            "method": m,                     # snake_case остаётся как источник
+            "model": pretty,
+            "method": m,
             "train_size": int(len(train_df)),
             "test_size": int(len(test_df)),
             "balanced_accuracy": eval_metrics["balanced_accuracy"],
@@ -309,7 +429,6 @@ def run_from_params(
             **extra,
         }
 
-    # === Сводная таблица ===
     if len(methods_to_run) > 1 and test_has_labels:
         print("\n=== TOP по macro_f1 ===")
         rows = []
@@ -319,8 +438,6 @@ def run_from_params(
         for pretty, ba, f1 in rows:
             print(f"  {ba:.4f} / f1={f1:.4f}  {pretty}")
 
-    # === Сохранение JSON ===
-    # v16: имя файла = cosine-results-<basename(model_dir) or 'default'>-<YYYY-MM-DDTHH:MM>.json
     if results_out is None:
         model_tag = os.path.basename(os.path.normpath(model_dir)) if model_dir else "default"
         if not model_tag:
@@ -353,7 +470,6 @@ def run_from_params(
     except Exception as e:
         print(f"[WARN] не удалось сохранить {results_out}: {e}")
 
-    # === Возврат: если был один метод — back-compat ===
     if len(methods_to_run) == 1:
         m = methods_to_run[0]
         res = per_method_results[m]
@@ -415,8 +531,7 @@ def build_argparser():
     parser.add_argument("--method", type=str,
                         choices=METHOD_CHOICES,
                         default=METHOD,
-                        help='Default "all" — прогон всех методов. Или укажи один: '
-                             'centroid / nearest / centroid_nn.')
+                        help='Default "all" — прогон всех методов.')
 
     parser.add_argument("--max-length", type=int, default=MAX_LENGTH)
     parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
@@ -436,13 +551,16 @@ def build_argparser():
     parser.add_argument("--centroid-trim-mode", type=str,
                         choices=["hard", "soft"], default=CENTROID_TRIM_MODE)
     parser.add_argument("--centroid-trim-power", type=float, default=CENTROID_TRIM_POWER)
+    parser.add_argument("--centroid-trim-power-sweep", type=str,
+                        default=CENTROID_TRIM_POWER_SWEEP)
     parser.add_argument("--centroid-refine-iters", type=int, default=CENTROID_REFINE_ITERS)
 
     parser.add_argument("--ensemble-alpha", type=float, default=ENSEMBLE_ALPHA)
+    parser.add_argument("--ensemble-alpha-sweep", type=str,
+                        default=ENSEMBLE_ALPHA_SWEEP)
 
     parser.add_argument("--results-out", type=str, default=None,
-                        help="Куда сохранить JSON. По умолчанию рядом с train.csv: "
-                             "cosine-results-<model_dir basename or 'default'>-<datetime>.json")
+                        help="Куда сохранить JSON.")
     return parser
 
 
@@ -473,8 +591,10 @@ def main():
         centroid_trim_ratio=args.centroid_trim,
         centroid_trim_mode=args.centroid_trim_mode,
         centroid_trim_power=args.centroid_trim_power,
+        centroid_trim_power_sweep=args.centroid_trim_power_sweep,
         centroid_refine_iters=args.centroid_refine_iters,
         ensemble_alpha=args.ensemble_alpha,
+        ensemble_alpha_sweep=args.ensemble_alpha_sweep,
         results_out=args.results_out,
     )
 

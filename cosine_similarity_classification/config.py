@@ -14,7 +14,6 @@ TEXT_COLUMN: str = "text"
 LABEL_COLUMN: str = "label"
 
 # Дефолтный метод. Доступно: "all" | "centroid" | "nearest" | "centroid_nn"
-# v14: дефолт = "all" — прогон всех методов одной командой (по аналогии с hybrid classical).
 METHOD: str = "all"
 
 MAX_LENGTH: int = _emb.max_length
@@ -34,24 +33,25 @@ MODEL_DIR: str = ""
 # -----------------------------------------------------------------------------
 KNN_K: int = 5
 KNN_TEMPERATURE: float = 0.1
-# Sweep по k: "1,3,5,7,9,11,15"; пустая строка → один k из KNN_K
-KNN_K_SWEEP: str = "1,3,5,7,9,11,15"
-# Sweep по температуре: "0.05,0.1,0.2,0.3"; пустая → один T из KNN_TEMPERATURE
-KNN_T_SWEEP: str = "0.05,0.1,0.2"
+# v17: расширенный sweep — добавлены k=21, k=31 и более тонкий шаг по T
+KNN_K_SWEEP: str = "1,3,5,7,9,11,15,21,31"
+KNN_T_SWEEP: str = "0.03,0.05,0.1,0.15,0.2,0.3"
 
 # -----------------------------------------------------------------------------
 # Centroid: trim + soft-trim + refinement
 # -----------------------------------------------------------------------------
-# CENTROID_TRIM_RATIO=0.15 — доля «дальних» точек, отбрасываемых перед усреднением.
-# CENTROID_TRIM_MODE — "hard" (старое поведение, drop трим%) или "soft" (вес = sim^TRIM_POWER).
-# CENTROID_REFINE_ITERS — число итераций пересчёта (1 = одна доп. итерация после init).
 CENTROID_TRIM_RATIO: float = 0.15
-CENTROID_TRIM_MODE: str = "soft"   # "hard" | "soft"
-CENTROID_TRIM_POWER: float = 4.0   # для soft-trim: вес = max(sim, 0)^power
-CENTROID_REFINE_ITERS: int = 1     # итеративный пересчёт центроидов
+CENTROID_TRIM_MODE: str = "soft"
+CENTROID_TRIM_POWER: float = 4.0
+CENTROID_REFINE_ITERS: int = 1
+
+# v17: sweep по centroid_trim_power для centroid-метода
+# (пустая строка → используется одно значение CENTROID_TRIM_POWER)
+CENTROID_TRIM_POWER_SWEEP: str = "2,4,6,8"
 
 # -----------------------------------------------------------------------------
 # centroid_nn ensemble
 # -----------------------------------------------------------------------------
-# Финальный score = alpha * centroid_score + (1 - alpha) * nn_softvote_score
 ENSEMBLE_ALPHA: float = 0.5
+# v17: sweep по alpha для centroid_nn
+ENSEMBLE_ALPHA_SWEEP: str = "0.3,0.4,0.5,0.6,0.7"

@@ -209,7 +209,8 @@ def main():
         from .hybrid_mlp import _cfg_from_args
         cfg, feature_source = _cfg_from_args(args)
         run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device,
-                feature_source=feature_source)
+                feature_source=feature_source,
+                simple_head=getattr(args, "simple_head", None))            
     else:
         raise ValueError(f"Unknown command: {args.command}")
 

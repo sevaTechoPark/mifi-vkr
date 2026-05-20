@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 import logging
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
@@ -48,6 +49,18 @@ from cosine_similarity_classification.metrics import evaluate_predictions
 METHOD_CHOICES = ["all", "centroid", "nearest", "centroid_nn"]
 
 
+# v16: красивые имена методов. method_key (snake_case) — для group/source.
+PRETTY_METHOD_NAMES = {
+    "nearest": "Cosine-Nearest",
+    "centroid": "Cosine-Centroid",
+    "centroid_nn": "Cosine-CentroidNN",
+}
+
+
+def _pretty_method(method_key: str) -> str:
+    return PRETTY_METHOD_NAMES.get(method_key, method_key)
+
+
 def _test_has_label_column(test_file, label_col):
     test_head = pd.read_csv(test_file, nrows=1)
     return label_col in test_head.columns
@@ -72,7 +85,7 @@ def _parse_list(s, cast):
 
 
 # -----------------------------------------------------------------------------
-# Per-method runners (работают с уже посчитанными эмбеддингами)
+# Per-method runners
 # -----------------------------------------------------------------------------
 def _run_centroid(train_embs, train_labels, test_embs, *,
                   trim_ratio, trim_mode, trim_power, refine_iters):
@@ -124,19 +137,26 @@ def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
         "knn_temperature_best": float(best["temperature"]),
         "knn_k_sweep": [int(k) for k in k_list],
         "knn_t_sweep": [float(t) for t in t_list],
+        "sweep_table": [],  # заполним ниже, чтобы попало в JSON
     }
 
-    # Печать таблицы sweep
     if test_has_labels:
         from sklearn.metrics import f1_score, balanced_accuracy_score
         y_true_tmp = test_df[label_col].astype(str).values
-        print("--- nearest sweep (k × T) ---")
+        print(f"--- {_pretty_method('nearest')} sweep (k × T) ---")
         for item in sweep:
             ba = balanced_accuracy_score(y_true_tmp, item["pred_labels"])
             f1 = f1_score(y_true_tmp, item["pred_labels"], average="macro", zero_division=0)
             mark = " ← best" if (item["k"] == best["k"] and item["temperature"] == best["temperature"]) else ""
             print(f"  k={item['k']:>3} T={item['temperature']:.3f}: "
                   f"balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
+            extra["sweep_table"].append({
+                "k": int(item["k"]),
+                "temperature": float(item["temperature"]),
+                "balanced_accuracy": round(float(ba), 6),
+                "macro_f1": round(float(f1), 6),
+                "is_best": (item["k"] == best["k"] and item["temperature"] == best["temperature"]),
+            })
 
     return pred_labels, pred_scores, extra
 
@@ -166,16 +186,17 @@ def _run_centroid_nn(train_embs, train_labels, test_embs, *,
     return pred_labels, pred_scores, extra
 
 
-def _eval_and_print(method_name, pred_labels, test_df, label_col, test_has_labels):
+def _eval_and_print(method_key, pred_labels, test_df, label_col, test_has_labels):
+    pretty = _pretty_method(method_key)
     if test_has_labels:
         y_true = test_df[label_col].astype(str).values
         eval_metrics = evaluate_predictions(y_true, pred_labels)
-        print(f"{method_name}: "
+        print(f"{pretty}: "
               f"{{'balanced_accuracy': {eval_metrics['balanced_accuracy']:.6f}, "
               f"'macro_f1': {eval_metrics['macro_f1']:.6f}}}")
         return eval_metrics
     else:
-        print(f"{method_name}: predictions computed (test has no labels).")
+        print(f"{pretty}: predictions computed (test has no labels).")
         return {"balanced_accuracy": None, "macro_f1": None}
 
 
@@ -224,7 +245,7 @@ def run_from_params(
     train_df = load_texts_and_labels(train_file, text_col=text_col, label_col=label_col, require_labels=True)
     test_df = load_texts_and_labels(test_file, text_col=text_col, label_col=label_col, require_labels=test_has_labels)
 
-    # === Эмбеддинги считаем ОДИН раз и переиспользуем ===
+    # === Эмбеддинги считаем ОДИН раз ===
     embedder = build_embedder(
         model_dir=model_dir, base_model_name=base_model_name,
         max_length=max_length, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
@@ -239,7 +260,6 @@ def run_from_params(
     print(f"[INFO] Using device: {device}")
     print(f"[INFO] train_embs.shape={tuple(train_embs.shape)}, test_embs.shape={tuple(test_embs.shape)}")
 
-    # Определяем список методов
     if method == "all":
         methods_to_run = ["centroid", "nearest", "centroid_nn"]
     elif method in METHOD_CHOICES:
@@ -247,11 +267,11 @@ def run_from_params(
     else:
         raise ValueError(f"method must be one of {METHOD_CHOICES}")
 
-    # === Прогон ===
     per_method_results = {}
 
     for m in methods_to_run:
-        print(f"\n=== Method: {m} ===")
+        pretty = _pretty_method(m)
+        print(f"\n=== Method: {pretty} ===")
         if m == "centroid":
             pred_labels, pred_scores, extra = _run_centroid(
                 train_embs, train_labels, test_embs,
@@ -278,7 +298,8 @@ def run_from_params(
         eval_metrics = _eval_and_print(m, pred_labels, test_df, label_col, test_has_labels)
 
         per_method_results[m] = {
-            "method": m,
+            "model": pretty,                 # v16: красивое имя
+            "method": m,                     # snake_case остаётся как источник
             "train_size": int(len(train_df)),
             "test_size": int(len(test_df)),
             "balanced_accuracy": eval_metrics["balanced_accuracy"],
@@ -288,20 +309,26 @@ def run_from_params(
             **extra,
         }
 
-    # === Сводная таблица (если был method=all и есть метки) ===
+    # === Сводная таблица ===
     if len(methods_to_run) > 1 and test_has_labels:
         print("\n=== TOP по macro_f1 ===")
         rows = []
         for m, res in per_method_results.items():
-            rows.append((m, res["balanced_accuracy"], res["macro_f1"]))
+            rows.append((_pretty_method(m), res["balanced_accuracy"], res["macro_f1"]))
         rows.sort(key=lambda r: r[2], reverse=True)
-        for m, ba, f1 in rows:
-            print(f"  {ba:.4f} / f1={f1:.4f}  {m}")
+        for pretty, ba, f1 in rows:
+            print(f"  {ba:.4f} / f1={f1:.4f}  {pretty}")
 
     # === Сохранение JSON ===
+    # v16: имя файла = cosine-results-<basename(model_dir) or 'default'>-<YYYY-MM-DDTHH:MM>.json
     if results_out is None:
-        # дефолтное место: рядом с train.csv
-        results_out = str(Path(train_file).expanduser().parent / "cosine_results.json")
+        model_tag = os.path.basename(os.path.normpath(model_dir)) if model_dir else "default"
+        if not model_tag:
+            model_tag = "default"
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        out_name = f"cosine-results-{model_tag}-{stamp}.json"
+        results_out = str(Path(train_file).expanduser().parent / out_name)
+
     try:
         out_dump = {
             "model_dir": model_dir,
@@ -313,7 +340,10 @@ def run_from_params(
             "test_size": int(len(test_df)),
             "methods_ran": methods_to_run,
             "results": {
-                m: {k: v for k, v in res.items() if k not in ("pred_labels", "pred_scores")}
+                m: {
+                    k: v for k, v in res.items()
+                    if k not in ("pred_labels", "pred_scores")
+                }
                 for m, res in per_method_results.items()
             },
         }
@@ -323,12 +353,13 @@ def run_from_params(
     except Exception as e:
         print(f"[WARN] не удалось сохранить {results_out}: {e}")
 
-    # === Возврат: если был ровно один метод — возвращаем как раньше (back-compat) ===
+    # === Возврат: если был один метод — back-compat ===
     if len(methods_to_run) == 1:
         m = methods_to_run[0]
         res = per_method_results[m]
         components = {
             "method": m,
+            "model": _pretty_method(m),
             "model_dir": model_dir,
             "num_train": int(len(train_df)),
             "num_test": int(len(test_df)),
@@ -339,6 +370,7 @@ def run_from_params(
         }
         metrics = {
             "method": m,
+            "model": _pretty_method(m),
             "train_size": res["train_size"],
             "test_size": res["test_size"],
             "model_dir": model_dir,
@@ -350,17 +382,20 @@ def run_from_params(
             "batch_size": int(batch_size),
             "device": device,
             **{k: v for k, v in res.items() if k not in (
-                "pred_labels", "pred_scores", "method", "train_size", "test_size"
+                "pred_labels", "pred_scores", "method", "model",
+                "train_size", "test_size",
             )},
         }
         return components, metrics
 
-    # method=all → возвращаем dict со всеми
     return {"per_method": per_method_results}, {
         "device": device, "model_dir": model_dir,
         "methods_ran": methods_to_run,
         "per_method_metrics": {
-            m: {"balanced_accuracy": r["balanced_accuracy"], "macro_f1": r["macro_f1"]}
+            _pretty_method(m): {
+                "balanced_accuracy": r["balanced_accuracy"],
+                "macro_f1": r["macro_f1"],
+            }
             for m, r in per_method_results.items()
         },
     }
@@ -394,10 +429,8 @@ def build_argparser():
 
     parser.add_argument("--knn-k", type=int, default=KNN_K)
     parser.add_argument("--knn-temperature", type=float, default=KNN_TEMPERATURE)
-    parser.add_argument("--knn-k-sweep", type=str, default=KNN_K_SWEEP,
-                        help='Список k через запятую, напр. "1,3,5,7,9,11,15".')
-    parser.add_argument("--knn-t-sweep", type=str, default=KNN_T_SWEEP,
-                        help='Список температур, напр. "0.05,0.1,0.2".')
+    parser.add_argument("--knn-k-sweep", type=str, default=KNN_K_SWEEP)
+    parser.add_argument("--knn-t-sweep", type=str, default=KNN_T_SWEEP)
 
     parser.add_argument("--centroid-trim", type=float, default=CENTROID_TRIM_RATIO)
     parser.add_argument("--centroid-trim-mode", type=str,
@@ -408,7 +441,8 @@ def build_argparser():
     parser.add_argument("--ensemble-alpha", type=float, default=ENSEMBLE_ALPHA)
 
     parser.add_argument("--results-out", type=str, default=None,
-                        help="Куда сохранить JSON со сводкой. По умолчанию рядом с train.csv → cosine_results.json")
+                        help="Куда сохранить JSON. По умолчанию рядом с train.csv: "
+                             "cosine-results-<model_dir basename or 'default'>-<datetime>.json")
     return parser
 
 

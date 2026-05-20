@@ -9,6 +9,7 @@ from .config import (
     HybridDataConfig,
     HybridPathConfig,
     HYBRID_MLP_PROFILES,
+    DEFAULT_HYBRID_MLP_PROFILE,
 )
 from .hybrid_vector_build import run_build
 from .hybrid_classical_models import run_classical
@@ -52,7 +53,6 @@ def _detect_device(device=None):
         device = str(device).strip().lower()
         if device:
             return device
-
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -62,22 +62,16 @@ def _detect_device(device=None):
 
 def build_configs_from_args(args):
     model_cfg = _override_dataclass_from_args(
-        HybridModelConfig(),
-        args,
-        {f.name for f in fields(HybridModelConfig)},
+        HybridModelConfig(), args, {f.name for f in fields(HybridModelConfig)},
     )
     data_cfg = _override_dataclass_from_args(
-        HybridDataConfig(),
-        args,
-        {f.name for f in fields(HybridDataConfig)},
+        HybridDataConfig(), args, {f.name for f in fields(HybridDataConfig)},
     )
-
     path_cfg = HybridPathConfig(
         train_file=args.train_file,
         test_file=args.test_file,
         output_dir=args.output_dir,
     )
-
     return model_cfg, data_cfg, path_cfg
 
 
@@ -97,19 +91,17 @@ def build_parser():
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    build_parser = subparsers.add_parser("build", help="Build hybrid vectors")
-    build_parser.add_argument("--train-file", required=True)
-    build_parser.add_argument("--test-file", required=True)
-    build_parser.add_argument("--output-dir", required=True)
-    build_parser.add_argument("--model-dir", default=None)
-    build_parser.add_argument("--device", default=None)
-
-    _add_dataclass_args(build_parser, HybridModelConfig)
-    _add_dataclass_args(build_parser, HybridDataConfig)
+    build_parser_ = subparsers.add_parser("build", help="Build hybrid vectors")
+    build_parser_.add_argument("--train-file", required=True)
+    build_parser_.add_argument("--test-file", required=True)
+    build_parser_.add_argument("--output-dir", required=True)
+    build_parser_.add_argument("--model-dir", default=None)
+    build_parser_.add_argument("--device", default=None)
+    _add_dataclass_args(build_parser_, HybridModelConfig)
+    _add_dataclass_args(build_parser_, HybridDataConfig)
 
     classical_parser = subparsers.add_parser(
-        "classical",
-        help="Run classical models on hybrid vectors",
+        "classical", help="Run classical models on hybrid vectors",
     )
     classical_parser.add_argument("--vecdir", required=True)
     classical_parser.add_argument("--class-weight", default=None,
@@ -124,8 +116,6 @@ def build_parser():
     mlp_parser.add_argument("--vecdir", required=True)
     mlp_parser.add_argument("--epochs", type=int, default=None)
     mlp_parser.add_argument("--device", default=None)
-
-    # MLP-гиперпараметры (если не задавать — берутся из HybridMLPConfig)
     mlp_parser.add_argument("--seed", type=int, default=None)
     mlp_parser.add_argument("--batch-size", type=int, default=None)
     mlp_parser.add_argument("--learning-rate", type=float, default=None)
@@ -136,16 +126,14 @@ def build_parser():
     mlp_parser.add_argument("--dropout", type=float, default=None)
     mlp_parser.add_argument("--focal-gamma", type=float, default=None)
     mlp_parser.add_argument("--label-smoothing", type=float, default=None)
+    mlp_parser.add_argument("--mixup-alpha", type=float, default=None)
+    mlp_parser.add_argument("--warmup-epochs", type=int, default=None)
+    mlp_parser.add_argument("--max-grad-norm", type=float, default=None)
     mlp_parser.add_argument(
-        "--profile",
-        type=str,
-        default=None,
-        choices=sorted(HYBRID_MLP_PROFILES.keys()),  # → ["clean", "custom", "noisy"]
-        help='Профиль гиперпараметров MLP. По умолчанию выбирается автоматически '
-             'по meta.json (custom_embedder → "custom", baseline → "noisy"). '
-             'Можно явно задать "custom" / "clean" / "noisy".',
+        "--profile", type=str, default=None,
+        choices=sorted(HYBRID_MLP_PROFILES.keys()),
+        help=f'MLP profile. Default: "{DEFAULT_HYBRID_MLP_PROFILE}".',
     )
-
     return parser
 
 
@@ -158,10 +146,6 @@ def main():
         device = _detect_device(args.device)
         print(f"[INFO] Using device: {device}")
 
-        # === АВТО-ДЕФОЛТ bert_weight в зависимости от --model-dir ===
-        # Проверяем, передал ли пользователь --bert-weight явно. Если нет (== 1.0,
-        # который и default в dataclass), и при этом задан --model-dir, переключаемся
-        # на bert_weight_with_model_dir (по умолчанию 5.0).
         user_passed_bw = any(arg.startswith("--bert-weight") for arg in sys.argv)
         if not user_passed_bw:
             if args.model_dir:
@@ -173,8 +157,6 @@ def main():
         else:
             print(f"[hybrid.build] using user-supplied bert_weight={model_cfg.bert_weight}")
 
-        # Авто-выключение StandardScaler для custom embedder
-        # (он уже отдаёт L2-нормированные эмбеддинги).
         if args.model_dir and not model_cfg.disable_bert_scaler:
             model_cfg.disable_bert_scaler = True
             print("[hybrid.build] model_dir is set → disabling BERT StandardScaler "
@@ -191,7 +173,7 @@ def main():
         )
     elif args.command == "classical":
         sources = tuple(s.strip() for s in (args.feature_sources or "bert_only,hybrid,tfidf_only").split(",") if s.strip())
-        c_grid = tuple(float(c) for c in (args.c_grid or "0.1,0.3,0.5,1.0,2.0,3.0,5.0").split(",") if c.strip())
+        c_grid = tuple(float(c) for c in (args.c_grid or "0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0").split(",") if c.strip())
         run_classical(
             args.vecdir,
             class_weight=args.class_weight,
@@ -206,17 +188,6 @@ def main():
         print(f"[INFO] Using device: {device}")
 
         from .hybrid_mlp import _cfg_from_args
-        from .config import autodetect_mlp_profile, DEFAULT_HYBRID_MLP_PROFILE
-
-        # Автодетект профиля по meta.json в vecdir, если пользователь не указал --profile.
-        if not args.profile:
-            detected = autodetect_mlp_profile(args.vecdir)
-            print(f"[mlp] profile not specified → autodetected: '{detected}' "
-                  f"(на основе meta.json в {args.vecdir})")
-            args.profile = detected
-        else:
-            print(f"[mlp] using user-specified profile: '{args.profile}'")
-
         cfg = _cfg_from_args(args)
         run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=device)
     else:

@@ -2,8 +2,8 @@ import os
 import json
 import argparse
 import warnings
-
 import random
+
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -19,13 +19,13 @@ from sklearn.utils.class_weight import compute_class_weight
 
 from .config import HybridMLPConfig, hybrid_mlp_config_from_profile, HYBRID_MLP_PROFILES
 
+
 def _seed_everything(seed: int):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    # CuDNN детерминизм (включается опционально, может замедлить)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -115,14 +115,10 @@ class FocalLoss(nn.Module):
 
 
 def _mixup_features(features, targets, alpha, num_classes):
-    """Mixup на скрытом представлении (после input_proj). Возвращает (mixed_features, soft_targets)."""
     if alpha <= 0.0:
-        # one-hot без смешивания
         return features, F.one_hot(targets, num_classes=num_classes).float()
-
     lam = np.random.beta(alpha, alpha)
     idx = torch.randperm(features.size(0), device=features.device)
-
     mixed_features = lam * features + (1 - lam) * features[idx]
     y_a = F.one_hot(targets, num_classes=num_classes).float()
     y_b = F.one_hot(targets[idx], num_classes=num_classes).float()
@@ -131,7 +127,6 @@ def _mixup_features(features, targets, alpha, num_classes):
 
 
 def _soft_cross_entropy(logits, soft_targets, class_weight=None):
-    """CE для soft-targets (после mixup). class_weight применяется per-class к log-prob."""
     log_probs = F.log_softmax(logits, dim=-1)
     if class_weight is not None:
         log_probs = log_probs * class_weight.unsqueeze(0)
@@ -153,11 +148,7 @@ def _evaluate(model, loader, device, labels_all=None):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
         warnings.simplefilter("ignore", category=UndefinedMetricWarning)
-        f1 = f1_score(
-            all_true, all_preds,
-            average="macro", zero_division=0,
-            labels=labels_all,
-        )
+        f1 = f1_score(all_true, all_preds, average="macro", zero_division=0, labels=labels_all)
     return {
         "balanced_accuracy": round(float(balanced_accuracy_score(all_true, all_preds)), 6),
         "macro_f1": round(float(f1), 6),
@@ -187,7 +178,6 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
     n_epochs = int(epochs) if epochs is not None else int(cfg.epochs)
     _seed_everything(cfg.seed)
 
-    # Если есть dense-версия (после SVD) — берём её, она быстрее и часто лучше для MLP.
     dense_train = os.path.join(vecdir, "X_train_dense.npy")
     dense_test = os.path.join(vecdir, "X_test_dense.npy")
     if os.path.exists(dense_train) and os.path.exists(dense_test):
@@ -224,8 +214,17 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
     device = _resolve_device(device)
     pin = (device.type == "cuda")
 
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, num_workers=0, pin_memory=pin)
-    test_loader = DataLoader(test_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=0, pin_memory=pin)
+    # Детерминированный DataLoader: generator из seed
+    g = torch.Generator()
+    g.manual_seed(cfg.seed)
+    train_loader = DataLoader(
+        train_ds, batch_size=cfg.batch_size, shuffle=True,
+        num_workers=0, pin_memory=pin, generator=g, drop_last=False,
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=cfg.batch_size, shuffle=False,
+        num_workers=0, pin_memory=pin,
+    )
 
     model = StrongMLP(
         input_dim=X_train.shape[1],
@@ -237,8 +236,32 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
 
     cw_device = class_weights_t.to(device) if class_weights_t is not None else None
     criterion = FocalLoss(alpha=cw_device, gamma=cfg.focal_gamma, label_smoothing=cfg.label_smoothing)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs, eta_min=cfg.min_lr)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+    )
+
+    # === Warmup + cosine LR scheduler ===
+    warmup_epochs = int(getattr(cfg, "warmup_epochs", 0))
+    base_lr = cfg.learning_rate
+    min_lr = cfg.min_lr
+    max_grad_norm = float(getattr(cfg, "max_grad_norm", 1.0))
+
+    def _set_lr(epoch_idx):
+        if warmup_epochs > 0 and epoch_idx < warmup_epochs:
+            # линейный warmup от 0 до base_lr
+            warmup_lr = base_lr * (epoch_idx + 1) / max(1, warmup_epochs)
+            for pg in optimizer.param_groups:
+                pg["lr"] = warmup_lr
+            return
+        # после warmup — cosine annealing на оставшиеся эпохи
+        cosine_epochs = max(1, n_epochs - warmup_epochs)
+        progress = (epoch_idx - warmup_epochs) / cosine_epochs
+        progress = min(max(progress, 0.0), 1.0)
+        cos_lr = min_lr + 0.5 * (base_lr - min_lr) * (1.0 + np.cos(np.pi * progress))
+        for pg in optimizer.param_groups:
+            pg["lr"] = cos_lr
 
     best_f1 = -1.0
     best_metrics = None
@@ -247,6 +270,7 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
     epoch = -1
 
     for epoch in range(n_epochs):
+        _set_lr(epoch)
         model.train()
         epoch_losses = []
         for xb, yb in train_loader:
@@ -267,16 +291,17 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
                 loss = criterion(logits, yb)
 
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if max_grad_norm and max_grad_norm > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
             optimizer.step()
             epoch_losses.append(loss.item())
-
-        scheduler.step()
 
         metrics = _evaluate(model, test_loader, device, labels_all=labels_all)
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
         current_lr = optimizer.param_groups[0]["lr"]
-        print(f"epoch={epoch + 1} lr={current_lr:.2e} train_loss={mean_loss:.6f} metrics={metrics}")
+        phase = "warmup" if epoch < warmup_epochs else "cosine"
+        print(f"epoch={epoch + 1} phase={phase} lr={current_lr:.2e} "
+              f"train_loss={mean_loss:.6f} metrics={metrics}")
 
         if metrics["macro_f1"] > best_f1:
             best_f1 = metrics["macro_f1"]
@@ -305,35 +330,21 @@ def run_mlp(vecdir, cfg: HybridMLPConfig | None = None, epochs: int | None = Non
         "label_smoothing": cfg.label_smoothing,
         "mixup_alpha": cfg.mixup_alpha,
         "use_class_weight": cfg.use_class_weight,
+        "warmup_epochs": warmup_epochs,
+        "max_grad_norm": max_grad_norm,
         "device": str(device),
         "num_classes": int(num_classes),
         "input_dim": int(X_train.shape[1]),
         "seed": cfg.seed,
-        "config_full": {
-            "learning_rate": cfg.learning_rate,
-            "weight_decay": cfg.weight_decay,
-            "epochs": cfg.epochs,
-            "patience": cfg.patience,
-            "hidden_dim": cfg.hidden_dim,
-            "num_blocks": cfg.num_blocks,
-            "dropout": cfg.dropout,
-            "focal_gamma": cfg.focal_gamma,
-            "label_smoothing": cfg.label_smoothing,
-            "mixup_alpha": cfg.mixup_alpha,
-            "use_class_weight": cfg.use_class_weight,
-            "batch_size": cfg.batch_size,
-        },
     }
 
     print("\nBEST RESULT")
     print(best_metrics)
 
-    # сохраняем результаты MLP
     out_path = os.path.join(vecdir, "mlp_results.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2, default=str)
     print(f"Saved: {out_path}")
-
     return results
 
 
@@ -353,27 +364,33 @@ def build_argparser():
     parser.add_argument("--focal-gamma", type=float, default=None)
     parser.add_argument("--label-smoothing", type=float, default=None)
     parser.add_argument("--mixup-alpha", type=float, default=None)
-    parser.add_argument("--use-class-weight", type=lambda v: str(v).lower() in {"true","1","yes"}, default=None)
-    parser.add_argument("--profile", type=str, default=None, choices=sorted(HYBRID_MLP_PROFILES.keys()), help='Профиль гиперпараметров: "noisy" (для baseline) или "clean" (для custom_embedder).')
+    parser.add_argument("--use-class-weight",
+                        type=lambda v: str(v).lower() in {"true", "1", "yes"},
+                        default=None)
+    parser.add_argument("--warmup-epochs", type=int, default=None)
+    parser.add_argument("--max-grad-norm", type=float, default=None)
+    parser.add_argument("--profile", type=str, default=None,
+                        choices=sorted(HYBRID_MLP_PROFILES.keys()),
+                        help='Профиль гиперпараметров: "noisy" (DEFAULT), "clean", "custom" (экспериментальный).')
     return parser
 
 
 def _cfg_from_args(args):
     from dataclasses import replace
 
-    # 1) База: либо профиль, либо обычный HybridMLPConfig()
     if getattr(args, "profile", None):
         cfg = hybrid_mlp_config_from_profile(args.profile)
         print(f"[hybrid_mlp] using profile: {args.profile!r}")
     else:
-        cfg = HybridMLPConfig()
+        # Дефолт — noisy
+        cfg = hybrid_mlp_config_from_profile("noisy")
+        print(f"[hybrid_mlp] using default profile: 'noisy'")
 
-    # 2) CLI-оверрайды поверх профиля
     overrides = {}
     for name in (
         "seed", "batch_size", "learning_rate", "patience", "weight_decay",
         "hidden_dim", "num_blocks", "dropout", "focal_gamma", "label_smoothing",
-        "mixup_alpha", "use_class_weight",
+        "mixup_alpha", "use_class_weight", "warmup_epochs", "max_grad_norm",
     ):
         val = getattr(args, name, None)
         if val is not None:

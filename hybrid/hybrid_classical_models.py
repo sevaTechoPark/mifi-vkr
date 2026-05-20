@@ -15,8 +15,7 @@ from sklearn.linear_model import LogisticRegression, RidgeClassifier, SGDClassif
 from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.naive_bayes import ComplementNB, MultinomialNB
 from sklearn.svm import LinearSVC, SVC
-from sklearn.ensemble import StackingClassifier
-from sklearn.preprocessing import normalize
+from sklearn.ensemble import StackingClassifier, VotingClassifier
 
 
 # -----------------------------------------------------------------------------
@@ -60,7 +59,7 @@ def _safe_fit_eval(name, model, Xtr, ytr, Xte, yte, results, tag=""):
 # C-grid for linear models
 # -----------------------------------------------------------------------------
 def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
-    best = (None, None, None)  # (C, model, metrics)
+    best = (None, None, None)
     base_kwargs = {"random_state": 42, "max_iter": 10000, "dual": False}
     if class_weight is not None:
         base_kwargs["class_weight"] = class_weight
@@ -80,6 +79,27 @@ def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
             "best_C": best[0],
             **best[2],
         })
+    return best
+
+
+def _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
+    """LinearSVC с penalty=l1 (sparse weights, другая регуляризация)."""
+    best = (None, None, None)
+    for C in c_grid:
+        kwargs = {
+            "C": C, "random_state": 42, "max_iter": 10000,
+            "penalty": "l1", "dual": False, "loss": "squared_hinge",
+        }
+        if class_weight is not None:
+            kwargs["class_weight"] = class_weight
+        model = LinearSVC(**kwargs)
+        m, metrics = _safe_fit_eval(
+            f"linear_svc_l1_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+        )
+        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+            best = (C, m, metrics)
+    if best[0] is not None:
+        print(f"  ★ best linear_svc_l1[{tag}]: C={best[0]} → {best[2]}")
     return best
 
 
@@ -109,23 +129,44 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     return best
 
 
+def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
+    best = (None, None, None)
+    for C in c_grid:
+        kwargs = {
+            "C": C, "max_iter": 4000, "random_state": 42,
+            "penalty": "l1", "solver": "saga",
+        }
+        if class_weight is not None:
+            kwargs["class_weight"] = class_weight
+        model = LogisticRegression(**kwargs)
+        m, metrics = _safe_fit_eval(
+            f"logreg_l1_C{C}", model, Xtr, ytr, Xte, yte, results, tag=tag
+        )
+        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+            best = (C, m, metrics)
+    if best[0] is not None:
+        print(f"  ★ best logreg_l1[{tag}]: C={best[0]} → {best[2]}")
+    return best
+
+
 # -----------------------------------------------------------------------------
-# Per-source pipelines
+# Per-source pipeline
 # -----------------------------------------------------------------------------
-def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight, include_rbf=False):
-    """
-    Прогон полного набора линейных моделей на одной фиче.
-    tag: 'bert_only' | 'hybrid' | 'tfidf_only'
-    """
+def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
+                   include_rbf=False, include_l1=True, include_voting=True):
     print(f"\n=== Source: {tag} | shape={Xtr.shape} | class_weight={class_weight!r} ===")
 
-    # 1) LinearSVC grid
     best_svc = _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
-
-    # 2) LogReg grid
     best_lr = _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
 
-    # 3) Calibrated SVC (на лучшем C)
+    if include_l1:
+        # l1-варианты часто полезны как другая регуляризация
+        _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
+        if not sp.issparse(Xtr):
+            # saga на больших sparse очень медленно — только для dense (bert_only)
+            _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
+
+    # Calibrated SVC (sigmoid + isotonic) на лучшем C
     if best_svc[0] is not None:
         class_counts = pd.Series(ytr).value_counts()
         min_class_count = int(class_counts.min())
@@ -141,22 +182,22 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight, inclu
                     Xtr, ytr, Xte, yte, results, tag=tag,
                 )
 
-    # 4) RidgeClassifier
+    # RidgeClassifier
     base = {"random_state": 42}
     if class_weight is not None:
         base["class_weight"] = class_weight
     _safe_fit_eval("ridge_classifier", RidgeClassifier(**base),
                    Xtr, ytr, Xte, yte, results, tag=tag)
 
-    # 5) SGD hinge (на больших разреженных это часто полезно)
+    # SGD hinge
     sgd_kwargs = {"random_state": 42, "max_iter": 2000, "alpha": 1e-5,
-                  "loss": "hinge", "n_jobs": -1}
+                  "loss": "hinge"}
     if class_weight is not None:
         sgd_kwargs["class_weight"] = class_weight
     _safe_fit_eval("sgd_hinge", SGDClassifier(**sgd_kwargs),
                    Xtr, ytr, Xte, yte, results, tag=tag)
 
-    # 6) SVC-rbf — только для dense bert_only (на hybrid слишком дорого/мусор)
+    # SVC-rbf — только для dense bert_only
     if include_rbf and not sp.issparse(Xtr):
         rbf_kwargs = {"random_state": 42, "kernel": "rbf", "C": 4.0, "gamma": "scale"}
         if class_weight is not None:
@@ -164,19 +205,40 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight, inclu
         _safe_fit_eval("svc_rbf_C4", SVC(**rbf_kwargs),
                        Xtr, ytr, Xte, yte, results, tag=tag)
 
+    # VotingClassifier на топ-3 моделях (только если есть best_svc и best_lr)
+    if include_voting and best_svc[0] is not None and best_lr[0] is not None:
+        class_counts = pd.Series(ytr).value_counts()
+        min_cc = int(class_counts.min())
+        if min_cc >= 2:
+            safe_cv = max(2, min(3, min_cc))
+            cw = class_weight
+            svc_cal = CalibratedClassifierCV(
+                LinearSVC(C=best_svc[0], max_iter=10000, dual=False,
+                          random_state=42, class_weight=cw),
+                method="sigmoid", cv=safe_cv,
+            )
+            lr = LogisticRegression(
+                C=best_lr[0], max_iter=4000, random_state=42,
+                solver="lbfgs", class_weight=cw,
+            )
+            ridge_cal = CalibratedClassifierCV(
+                RidgeClassifier(random_state=42, class_weight=cw),
+                method="sigmoid", cv=safe_cv,
+            )
+            voter = VotingClassifier(
+                estimators=[("svc", svc_cal), ("lr", lr), ("ridge", ridge_cal)],
+                voting="soft", n_jobs=1,
+            )
+            _safe_fit_eval(f"voting_soft_top3", voter,
+                           Xtr, ytr, Xte, yte, results, tag=tag)
+
     return best_svc, best_lr
 
 
 # -----------------------------------------------------------------------------
-# Stacking
+# Stacking (на bert_only, требует min_class >=2)
 # -----------------------------------------------------------------------------
-def _run_stacking(X_bert_tr, X_bert_te, X_hyb_tr, X_hyb_te, ytr, yte,
-                  results, best_C_bert, best_C_hyb, class_weight):
-    """
-    Стэкинг: 3 базовых предиктора → logreg-meta.
-    Базы: linear_svc_calibrated на bert_only, logreg на bert_only, linear_svc на hybrid.
-    Все обёрнуты в CalibratedClassifierCV для предсказания вероятностей.
-    """
+def _run_stacking(X_bert_tr, X_bert_te, ytr, yte, results, best_C_bert, class_weight):
     print(f"\n=== Stacking ===")
     class_counts = pd.Series(ytr).value_counts()
     min_cc = int(class_counts.min())
@@ -189,9 +251,6 @@ def _run_stacking(X_bert_tr, X_bert_te, X_hyb_tr, X_hyb_te, ytr, yte,
     if class_weight is not None:
         base_svc["class_weight"] = class_weight
 
-    # Подходит только для одного X. Stacking стандартный требует общий X для всех base.
-    # Используем bert_only как общий X (он dense, разумного размера).
-    # Это даёт мета-стек, где разные алгоритмы дают разные сигналы на одних фичах.
     estimators = [
         ("svc_cal", CalibratedClassifierCV(
             LinearSVC(C=(best_C_bert or 1.0), **base_svc), method="sigmoid", cv=cv
@@ -227,20 +286,18 @@ def run_classical(
     class_weight: str | None = None,
     include_tfidf_only: bool = True,
     feature_sources: Tuple[str, ...] = ("bert_only", "hybrid", "tfidf_only"),
-    c_grid: Tuple[float, ...] = (0.1, 0.3, 1.0, 3.0),
+    c_grid: Tuple[float, ...] = (0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0),
     enable_stacking: bool = True,
     enable_rbf: bool = True,
 ):
     """
-    Полный classical-прогон на разных представлениях.
+    Полный classical-прогон. Cosine-методы убраны — для них есть отдельный модуль.
 
     feature_sources:
       - 'bert_only'   → X_*_bert.npy (L2-нормированный, dense, dim=1024)
-      - 'hybrid'      → X_*_hybrid.npz (TF-IDF + BERT*bw, БЕЗ финальной L2)
-      - 'tfidf_only'  → строит TF-IDF на лету из texts_*.csv (NB-семейство)
-    c_grid: мини-grid по C для linear_svc / logreg
-    enable_stacking: финальный stacking на bert_only
-    enable_rbf: SVC-rbf на bert_only (медленно, но часто +1-3 BA)
+      - 'hybrid'      → X_*_hybrid_noL2.npz (per-block L2, без финальной L2)
+      - 'tfidf_only'  → строит TF-IDF на лету из texts_*.csv (NB + linear suite)
+    c_grid: расширенный grid по C (was 0.1-3, now 0.05-5)
     """
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
@@ -257,7 +314,6 @@ def run_classical(
     print(f"feature_sources: {feature_sources} | c_grid: {c_grid}")
 
     X_bert_tr = X_bert_te = None
-    X_hyb_tr = X_hyb_te = None
 
     # === bert_only ===
     if "bert_only" in feature_sources:
@@ -266,18 +322,18 @@ def run_classical(
         if os.path.exists(bert_tr_path) and os.path.exists(bert_te_path):
             X_bert_tr = np.load(bert_tr_path).astype(np.float32)
             X_bert_te = np.load(bert_te_path).astype(np.float32)
-            # на всякий случай повторно нормируем (если файл старый)
+            from sklearn.preprocessing import normalize
             X_bert_tr = normalize(X_bert_tr, norm="l2", axis=1)
             X_bert_te = normalize(X_bert_te, norm="l2", axis=1)
             best_svc, best_lr = _run_on_source(
                 X_bert_tr, y_train, X_bert_te, y_test, results,
                 tag="bert_only", c_grid=c_grid, class_weight=class_weight,
-                include_rbf=enable_rbf,
+                include_rbf=enable_rbf, include_l1=True, include_voting=True,
             )
             bests["bert_only"] = {"svc": best_svc, "lr": best_lr}
         else:
             print(f"\n[!] bert_only SKIPPED: нет {bert_tr_path}. "
-                  f"Перезапусти `hybrid build` с новой версией hybrid_vector_build.py")
+                  f"Перезапусти `hybrid build`.")
 
     # === hybrid ===
     if "hybrid" in feature_sources:
@@ -291,11 +347,10 @@ def run_classical(
             print("[hybrid] fallback: using X_train_hybrid.npz (final L2 applied)")
             X_hyb_tr = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz"))
             X_hyb_te = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz"))
-        # ← ВОТ ЭТОТ ВЫЗОВ ПРОПАЛ ИЗ ТВОЕГО ЛОГА: добавлен явно
         best_svc, best_lr = _run_on_source(
             X_hyb_tr, y_train, X_hyb_te, y_test, results,
             tag="hybrid", c_grid=c_grid, class_weight=class_weight,
-            include_rbf=False,
+            include_rbf=False, include_l1=True, include_voting=True,
         )
         bests["hybrid"] = {"svc": best_svc, "lr": best_lr}
 
@@ -325,23 +380,18 @@ def run_classical(
             _safe_fit_eval("complement_nb", ComplementNB(),
                            Xtr, ytr, Xte, yte, results, tag="tfidf_only")
 
-            # full linear suite + grid
             _run_on_source(
                 Xtr, ytr, Xte, yte, results,
-                tag="tfidf_only", c_grid=c_grid, class_weight=class_weight, include_rbf=False,
+                tag="tfidf_only", c_grid=c_grid, class_weight=class_weight,
+                include_rbf=False, include_l1=True, include_voting=False,
             )
 
     # === Stacking (на bert_only) ===
     if enable_stacking and X_bert_tr is not None:
         best_C_bert = bests.get("bert_only", {}).get("svc", (None,))[0]
-        best_C_hyb = bests.get("hybrid", {}).get("svc", (None,))[0]
         _run_stacking(
-            X_bert_tr, X_bert_te,
-            X_hyb_tr if X_hyb_tr is not None else X_bert_tr,
-            X_hyb_te if X_hyb_te is not None else X_bert_te,
-            y_train, y_test, results,
-            best_C_bert=best_C_bert, best_C_hyb=best_C_hyb,
-            class_weight=class_weight,
+            X_bert_tr, X_bert_te, y_train, y_test, results,
+            best_C_bert=best_C_bert, class_weight=class_weight,
         )
 
     # === Сводка ===
@@ -369,24 +419,16 @@ def run_classical(
     return results
 
 
-# -----------------------------------------------------------------------------
-# CLI
-# -----------------------------------------------------------------------------
 def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
     parser.add_argument("--class-weight", default=None,
                         choices=[None, "balanced"], nargs="?")
-    parser.add_argument("--no-tfidf-only", action="store_true",
-                        help="Не запускать TF-IDF-only ветку (NB-семейство и пр.)")
-    parser.add_argument("--feature-sources", default="bert_only,hybrid,tfidf_only",
-                        help="Через запятую: bert_only,hybrid,tfidf_only")
-    parser.add_argument("--c-grid", default="0.1,0.3,1.0,3.0",
-                        help="Через запятую: значения C для LinearSVC/LogReg grid")
-    parser.add_argument("--no-stacking", action="store_true",
-                        help="Выключить stacking")
-    parser.add_argument("--no-rbf", action="store_true",
-                        help="Выключить SVC-rbf на bert_only (быстрее)")
+    parser.add_argument("--no-tfidf-only", action="store_true")
+    parser.add_argument("--feature-sources", default="bert_only,hybrid,tfidf_only")
+    parser.add_argument("--c-grid", default="0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0")
+    parser.add_argument("--no-stacking", action="store_true")
+    parser.add_argument("--no-rbf", action="store_true")
     return parser
 
 

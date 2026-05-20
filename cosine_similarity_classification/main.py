@@ -22,7 +22,12 @@ from cosine_similarity_classification.config import (
     KNN_K,
     KNN_TEMPERATURE,
     KNN_K_SWEEP,
+    KNN_T_SWEEP,
     CENTROID_TRIM_RATIO,
+    CENTROID_TRIM_MODE,
+    CENTROID_TRIM_POWER,
+    CENTROID_REFINE_ITERS,
+    ENSEMBLE_ALPHA,
 )
 from cosine_similarity_classification.embedder import (
     load_texts_and_labels,
@@ -31,7 +36,9 @@ from cosine_similarity_classification.embedder import (
 )
 from cosine_similarity_classification.classifiers import (
     predict_nearest,
+    predict_nearest_sweep,
     predict_centroid,
+    predict_centroid_nn_ensemble,
 )
 from cosine_similarity_classification.metrics import evaluate_predictions
 
@@ -46,12 +53,17 @@ def _detect_device(device=None):
         device = str(device).strip().lower()
         if device:
             return device
-
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _parse_list(s, cast):
+    if not s or not str(s).strip():
+        return []
+    return [cast(x) for x in str(s).split(",") if str(x).strip()]
 
 
 def run_from_params(
@@ -72,7 +84,12 @@ def run_from_params(
     knn_k: int = KNN_K,
     knn_temperature: float = KNN_TEMPERATURE,
     knn_k_sweep: str = KNN_K_SWEEP,
+    knn_t_sweep: str = KNN_T_SWEEP,
     centroid_trim_ratio: float = CENTROID_TRIM_RATIO,
+    centroid_trim_mode: str = CENTROID_TRIM_MODE,
+    centroid_trim_power: float = CENTROID_TRIM_POWER,
+    centroid_refine_iters: int = CENTROID_REFINE_ITERS,
+    ensemble_alpha: float = ENSEMBLE_ALPHA,
 ):
     train_file = str(Path(train_file).expanduser())
     test_file = str(Path(test_file).expanduser())
@@ -83,106 +100,108 @@ def run_from_params(
         model_dir = str(model_dir).strip()
         if model_dir:
             model_dir = str(Path(model_dir).expanduser())
-        else:
-            model_dir = ""
 
     device = _detect_device(device)
-
     test_has_labels = _test_has_label_column(test_file, label_col)
 
-    train_df = load_texts_and_labels(
-        train_file,
-        text_col=text_col,
-        label_col=label_col,
-        require_labels=True,
-    )
-
-    test_df = load_texts_and_labels(
-        test_file,
-        text_col=text_col,
-        label_col=label_col,
-        require_labels=test_has_labels,
-    )
+    train_df = load_texts_and_labels(train_file, text_col=text_col, label_col=label_col, require_labels=True)
+    test_df = load_texts_and_labels(test_file, text_col=text_col, label_col=label_col, require_labels=test_has_labels)
 
     embedder = build_embedder(
-        model_dir=model_dir,
-        base_model_name=base_model_name,
-        max_length=max_length,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        pooling=pooling,
-        chunk_aggregation=chunk_aggregation,
-        batch_size=batch_size,
-        device=device,
+        model_dir=model_dir, base_model_name=base_model_name,
+        max_length=max_length, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+        pooling=pooling, chunk_aggregation=chunk_aggregation,
+        batch_size=batch_size, device=device,
     )
 
     train_embs = embed_dataframe(train_df, embedder, text_col=text_col)
     test_embs = embed_dataframe(test_df, embedder, text_col=text_col)
-
     train_labels = train_df[label_col].astype(str).values
 
-    if method == "nearest":
-        # При непустом knn_k_sweep — пробежать список и взять лучший по macro_f1.
-        # Это печатается отдельно (см. ниже), а в metrics всегда уходит лучший.
-        if knn_k_sweep.strip():
-            k_list = [int(x) for x in knn_k_sweep.split(",") if x.strip()]
-        else:
-            k_list = [int(knn_k)]
+    extra = {}
 
-        sweep_results = []
-        best_k = k_list[0]
-        best_pred = None
-        best_scores = None
-        best_macro_f1 = -1.0
-
-        # Используем только labels из test, если они есть; иначе берём первый k.
-        # Чтобы не загромождать — все варианты считаем заранее.
-        for k_try in k_list:
-            preds, scores = predict_nearest(
-                train_embs=train_embs,
-                train_labels=train_labels,
-                query_embs=test_embs,
-                k=k_try,
-                temperature=float(knn_temperature),
-            )
-            sweep_results.append((k_try, preds, scores))
-
-        # Выбор лучшего — только если есть метки в test
-        if test_has_labels:
-            from sklearn.metrics import f1_score
-            y_true_tmp = test_df[label_col].astype(str).values
-            for k_try, preds, scores in sweep_results:
-                f1 = f1_score(y_true_tmp, preds, average="macro", zero_division=0)
-                if f1 > best_macro_f1:
-                    best_macro_f1 = f1
-                    best_k = k_try
-                    best_pred = preds
-                    best_scores = scores
-        else:
-            best_k, best_pred, best_scores = sweep_results[0]
-
-        pred_labels = best_pred
-        pred_scores = best_scores
-        extra = {
-            "knn_k": int(min(best_k, len(train_df))),
-            "knn_temperature": float(knn_temperature),
-            "knn_k_sweep": [k for k, _, _ in sweep_results],
-            "knn_k_best": int(best_k),
-        }
-    elif method == "centroid":
+    if method == "centroid":
         pred_labels, pred_scores, classes, centroids = predict_centroid(
-            train_embs=train_embs,
-            train_labels=train_labels,
-            query_embs=test_embs,
+            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
             trim_ratio=float(centroid_trim_ratio),
+            trim_mode=centroid_trim_mode,
+            trim_power=float(centroid_trim_power),
+            refine_iters=int(centroid_refine_iters),
         )
         extra = {
             "num_classes": int(len(classes)),
             "centroid_dim": int(centroids.shape[1]),
             "centroid_trim_ratio": float(centroid_trim_ratio),
+            "centroid_trim_mode": centroid_trim_mode,
+            "centroid_trim_power": float(centroid_trim_power),
+            "centroid_refine_iters": int(centroid_refine_iters),
+        }
+
+    elif method == "nearest":
+        k_list = _parse_list(knn_k_sweep, int) or [int(knn_k)]
+        t_list = _parse_list(knn_t_sweep, float) or [float(knn_temperature)]
+
+        sweep = predict_nearest_sweep(
+            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
+            k_list=k_list, t_list=t_list,
+        )
+
+        # Выбираем лучший (k,T) по macro_f1 если есть метки
+        best = sweep[0]
+        if test_has_labels:
+            from sklearn.metrics import f1_score
+            y_true_tmp = test_df[label_col].astype(str).values
+            best_f1 = -1.0
+            for item in sweep:
+                f1 = f1_score(y_true_tmp, item["pred_labels"], average="macro", zero_division=0)
+                item["macro_f1"] = float(f1)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best = item
+
+        pred_labels = best["pred_labels"]
+        pred_scores = best["pred_scores"]
+        extra = {
+            "knn_k_best": int(best["k"]),
+            "knn_temperature_best": float(best["temperature"]),
+            "knn_k_sweep": [int(k) for k in k_list],
+            "knn_t_sweep": [float(t) for t in t_list],
+        }
+
+        # Печать таблицы sweep (если есть метки)
+        if test_has_labels:
+            from sklearn.metrics import f1_score, balanced_accuracy_score
+            y_true_tmp = test_df[label_col].astype(str).values
+            print("--- nearest sweep (k × T) ---")
+            for item in sweep:
+                ba = balanced_accuracy_score(y_true_tmp, item["pred_labels"])
+                f1 = f1_score(y_true_tmp, item["pred_labels"], average="macro", zero_division=0)
+                mark = " ← best" if (item["k"] == best["k"] and item["temperature"] == best["temperature"]) else ""
+                print(f"  k={item['k']:>3} T={item['temperature']:.3f}: "
+                      f"balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
+
+    elif method == "centroid_nn":
+        pred_labels, pred_scores, classes = predict_centroid_nn_ensemble(
+            train_embs=train_embs, train_labels=train_labels, query_embs=test_embs,
+            trim_ratio=float(centroid_trim_ratio),
+            trim_mode=centroid_trim_mode,
+            trim_power=float(centroid_trim_power),
+            refine_iters=int(centroid_refine_iters),
+            k=int(knn_k),
+            temperature=float(knn_temperature),
+            alpha=float(ensemble_alpha),
+        )
+        extra = {
+            "num_classes": int(len(classes)),
+            "centroid_trim_ratio": float(centroid_trim_ratio),
+            "centroid_trim_mode": centroid_trim_mode,
+            "centroid_refine_iters": int(centroid_refine_iters),
+            "knn_k": int(knn_k),
+            "knn_temperature": float(knn_temperature),
+            "ensemble_alpha": float(ensemble_alpha),
         }
     else:
-        raise ValueError("method must be one of: ['nearest', 'centroid']")
+        raise ValueError("method must be one of: ['nearest', 'centroid', 'centroid_nn']")
 
     metrics = {
         "method": method,
@@ -220,18 +239,6 @@ def run_from_params(
     }
 
     print(f"[INFO] Using device: {device}")
-
-    # Печать sweep-таблицы для nearest, если был задан knn_k_sweep и есть метки
-    if method == "nearest" and test_has_labels and extra.get("knn_k_sweep"):
-        from sklearn.metrics import f1_score, balanced_accuracy_score
-        y_true_tmp = test_df[label_col].astype(str).values
-        print("--- nearest k-sweep ---")
-        for k_try, preds, _ in sweep_results:
-            ba = balanced_accuracy_score(y_true_tmp, preds)
-            f1 = f1_score(y_true_tmp, preds, average="macro", zero_division=0)
-            mark = " ← best" if k_try == extra["knn_k_best"] else ""
-            print(f"  k={k_try}: balanced_accuracy={ba:.6f}, macro_f1={f1:.6f}{mark}")
-
     if test_has_labels:
         print(
             f"{method}: "
@@ -248,54 +255,52 @@ def build_argparser():
     parser = argparse.ArgumentParser(
         description="Cosine similarity classification over embeddings"
     )
-    parser.add_argument("--train", type=str, required=True, help="Path to train CSV")
-    parser.add_argument("--test", type=str, required=True, help="Path to test CSV")
-    parser.add_argument(
-        "--model-dir",
-        type=str,
-        default=MODEL_DIR,
-        help="Directory with local embedding model weights",
-    )
+    parser.add_argument("--train", type=str, required=True)
+    parser.add_argument("--test", type=str, required=True)
+    parser.add_argument("--model-dir", type=str, default=MODEL_DIR)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--base-model-name", type=str, default=BASE_MODEL_NAME)
     parser.add_argument("--text-col", type=str, default=TEXT_COLUMN)
     parser.add_argument("--label-col", type=str, default=LABEL_COLUMN)
-    parser.add_argument("--method", type=str, choices=["nearest", "centroid"], default=METHOD)
+    parser.add_argument("--method", type=str,
+                        choices=["nearest", "centroid", "centroid_nn"],
+                        default=METHOD)
 
     parser.add_argument("--max-length", type=int, default=MAX_LENGTH)
     parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
     parser.add_argument("--chunk-overlap", type=int, default=CHUNK_OVERLAP)
-    parser.add_argument("--pooling", type=str, choices=["mean", "cls", "max", "mean_max"], default=POOLING)
-    parser.add_argument("--chunk-aggregation", type=str, choices=["mean", "max", "mean_max"], default=CHUNK_AGGREGATION)
+    parser.add_argument("--pooling", type=str,
+                        choices=["mean", "cls", "max", "mean_max"], default=POOLING)
+    parser.add_argument("--chunk-aggregation", type=str,
+                        choices=["mean", "max", "mean_max"], default=CHUNK_AGGREGATION)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
-    parser.add_argument("--knn-k", type=int, default=KNN_K, help="k для метода 'nearest' (soft-vote)")
-    parser.add_argument(
-        "--knn-temperature",
-        type=float,
-        default=KNN_TEMPERATURE,
-        help="Температура softmax для весов соседей. Меньше → острее голос.",
-    )
-    parser.add_argument(
-        "--knn-k-sweep",
-        type=str,
-        default=KNN_K_SWEEP,
-        help='Список k через запятую, напр. "1,3,5,7,9,11". Если задано — печатает таблицу и выбирает best по macro_f1.',
-    )
-    parser.add_argument(
-        "--centroid-trim",
-        type=float,
-        default=CENTROID_TRIM_RATIO,
-        help="Доля самых дальних точек класса, отбрасываемых перед усреднением (0.0-0.5). По умолчанию 0.",
-    )
 
+    parser.add_argument("--knn-k", type=int, default=KNN_K)
+    parser.add_argument("--knn-temperature", type=float, default=KNN_TEMPERATURE)
+    parser.add_argument("--knn-k-sweep", type=str, default=KNN_K_SWEEP,
+                        help='Список k через запятую, напр. "1,3,5,7,9,11,15".')
+    parser.add_argument("--knn-t-sweep", type=str, default=KNN_T_SWEEP,
+                        help='Список температур, напр. "0.05,0.1,0.2".')
+
+    parser.add_argument("--centroid-trim", type=float, default=CENTROID_TRIM_RATIO,
+                        help="Доля «дальних» точек, отбрасываемых перед усреднением (0.0-0.5).")
+    parser.add_argument("--centroid-trim-mode", type=str,
+                        choices=["hard", "soft"], default=CENTROID_TRIM_MODE,
+                        help="hard: drop trim%% (старое поведение); soft: вес = max(sim,0)^power.")
+    parser.add_argument("--centroid-trim-power", type=float, default=CENTROID_TRIM_POWER,
+                        help="Степень для soft-trim. 1 — линейный вес, 4 — резкий.")
+    parser.add_argument("--centroid-refine-iters", type=int, default=CENTROID_REFINE_ITERS,
+                        help="Сколько итераций пересчёта (0 = старое поведение).")
+
+    parser.add_argument("--ensemble-alpha", type=float, default=ENSEMBLE_ALPHA,
+                        help="Только для method=centroid_nn: вес centroid в смеси с NN.")
     return parser
 
 
 def main():
     parser = build_argparser()
     args = parser.parse_args()
-
-    print(f"[ARGS] {vars(args)}")   # видно сразу, не съел ли shell какой-нибудь --model-dir
+    print(f"[ARGS] {vars(args)}")
 
     _, metrics = run_from_params(
         train_file=args.train,
@@ -315,7 +320,12 @@ def main():
         knn_k=args.knn_k,
         knn_temperature=args.knn_temperature,
         knn_k_sweep=args.knn_k_sweep,
+        knn_t_sweep=args.knn_t_sweep,
         centroid_trim_ratio=args.centroid_trim,
+        centroid_trim_mode=args.centroid_trim_mode,
+        centroid_trim_power=args.centroid_trim_power,
+        centroid_refine_iters=args.centroid_refine_iters,
+        ensemble_alpha=args.ensemble_alpha,
     )
 
     print()

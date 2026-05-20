@@ -1,9 +1,7 @@
 """
 Конфиг модуля cosine_similarity_classification.
 
-Единственный источник правды по гиперпараметрам эмбеддера — bert_embeddings.config.EmbeddingConfig.
-Здесь мы только перечисляем поля для CLI-аргументов и значения по умолчанию вытаскиваем
-из EmbeddingConfig().
+Источник правды по гиперпараметрам эмбеддера — bert_embeddings.config.EmbeddingConfig.
 """
 
 from bert_embeddings.config import EmbeddingConfig
@@ -15,6 +13,7 @@ BASE_MODEL_NAME: str = _emb.base_model_name
 TEXT_COLUMN: str = "text"
 LABEL_COLUMN: str = "label"
 
+# Дефолтный метод. Доступно: "centroid" | "nearest" | "centroid_nn"
 METHOD: str = "centroid"
 
 MAX_LENGTH: int = _emb.max_length
@@ -29,17 +28,29 @@ BATCH_SIZE: int = _emb.batch_size
 DEVICE: str | None = None
 MODEL_DIR: str = ""
 
-# kNN-параметры для метода "nearest"
+# -----------------------------------------------------------------------------
+# kNN soft-vote
+# -----------------------------------------------------------------------------
 KNN_K: int = 5
-
-
-# kNN: soft-voting параметры
 KNN_TEMPERATURE: float = 0.1
-# Список k для sweep (через CLI --knn-k-sweep "1,3,5,7,9,11").
-KNN_K_SWEEP: str = ""
+# Sweep по k: "1,3,5,7,9,11,15"; пустая строка → один k из KNN_K
+KNN_K_SWEEP: str = "1,3,5,7,9,11,15"
+# Sweep по температуре: "0.05,0.1,0.2,0.3"; пустая → один T из KNN_TEMPERATURE
+KNN_T_SWEEP: str = "0.05,0.1,0.2"
 
-# Centroid: доля «дальних» точек класса, которые отбрасываются перед усреднением.
-# trim=0.15 выбран по результатам v6-сравнения. На custom embedder даёт +1.4pp
-# на train.csv, на baseline +0.7pp. trim=0.2 эквивалентен в среднем, но менее
-# устойчив на baseline_train.
+# -----------------------------------------------------------------------------
+# Centroid: trim + soft-trim + refinement
+# -----------------------------------------------------------------------------
+# CENTROID_TRIM_RATIO=0.15 — доля «дальних» точек, отбрасываемых перед усреднением.
+# CENTROID_TRIM_MODE — "hard" (старое поведение, drop трим%) или "soft" (вес = sim^TRIM_POWER).
+# CENTROID_REFINE_ITERS — число итераций пересчёта (1 = одна доп. итерация после init).
 CENTROID_TRIM_RATIO: float = 0.15
+CENTROID_TRIM_MODE: str = "soft"   # "hard" | "soft"
+CENTROID_TRIM_POWER: float = 4.0   # для soft-trim: вес = max(sim, 0)^power
+CENTROID_REFINE_ITERS: int = 1     # итеративный пересчёт центроидов
+
+# -----------------------------------------------------------------------------
+# centroid_nn ensemble
+# -----------------------------------------------------------------------------
+# Финальный score = alpha * centroid_score + (1 - alpha) * nn_softvote_score
+ENSEMBLE_ALPHA: float = 0.5

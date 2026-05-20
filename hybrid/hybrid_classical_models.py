@@ -37,6 +37,7 @@ def _safe_fit_eval(name, model, Xtr, ytr, Xte, yte, results, tag=""):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=ConvergenceWarning)
             warnings.simplefilter("ignore", category=UserWarning)
+            warnings.simplefilter("ignore", category=FutureWarning)
             model.fit(Xtr, ytr)
         pred = model.predict(Xte)
         metrics = _eval(yte, pred)
@@ -130,11 +131,15 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 
 
 def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
+    """
+    v14: используем penalty='elasticnet' + l1_ratio=1.0 — новый API sklearn 1.8+,
+    эквивалентно penalty='l1', но без FutureWarning.
+    """
     best = (None, None, None)
     for C in c_grid:
         kwargs = {
             "C": C, "max_iter": 4000, "random_state": 42,
-            "penalty": "l1", "solver": "saga",
+            "penalty": "elasticnet", "l1_ratio": 1.0, "solver": "saga",
         }
         if class_weight is not None:
             kwargs["class_weight"] = class_weight
@@ -283,7 +288,7 @@ def _run_stacking(X_bert_tr, X_bert_te, ytr, yte, results, best_C_bert, class_we
 # -----------------------------------------------------------------------------
 def run_classical(
     vecdir: str,
-    class_weight: str | None = None,
+    class_weight: str | None = "balanced",   # v14: default 'balanced' (было None)
     include_tfidf_only: bool = True,
     feature_sources: Tuple[str, ...] = ("bert_only", "hybrid", "tfidf_only"),
     c_grid: Tuple[float, ...] = (0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0),
@@ -292,6 +297,9 @@ def run_classical(
 ):
     """
     Полный classical-прогон. Cosine-методы убраны — для них есть отдельный модуль.
+
+    v14: class_weight по умолчанию 'balanced' — на min_class=1 это критично для macro_f1.
+    Передай явно class_weight=None для прежнего поведения.
 
     feature_sources:
       - 'bert_only'   → X_*_bert.npy (L2-нормированный, dense, dim=1024)
@@ -311,7 +319,7 @@ def run_classical(
 
     print(f"y_train: {len(y_train)} объектов, {num_classes} классов, "
           f"мин. класс = {min_class_count} пример(а/ов)")
-    print(f"feature_sources: {feature_sources} | c_grid: {c_grid}")
+    print(f"feature_sources: {feature_sources} | c_grid: {c_grid} | class_weight={class_weight!r}")
 
     X_bert_tr = X_bert_te = None
 
@@ -422,8 +430,9 @@ def run_classical(
 def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
-    parser.add_argument("--class-weight", default=None,
-                        choices=[None, "balanced"], nargs="?")
+    # v14: default='balanced' (раньше None)
+    parser.add_argument("--class-weight", default="balanced",
+                        choices=["balanced", "none"], nargs="?")
     parser.add_argument("--no-tfidf-only", action="store_true")
     parser.add_argument("--feature-sources", default="bert_only,hybrid,tfidf_only")
     parser.add_argument("--c-grid", default="0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0")
@@ -437,9 +446,10 @@ def main():
     args = parser.parse_args()
     sources = tuple(s.strip() for s in args.feature_sources.split(",") if s.strip())
     c_grid = tuple(float(c) for c in args.c_grid.split(",") if c.strip())
+    cw = None if (args.class_weight in (None, "none")) else args.class_weight
     run_classical(
         args.vecdir,
-        class_weight=args.class_weight,
+        class_weight=cw,
         include_tfidf_only=(not args.no_tfidf_only) and ("tfidf_only" in sources),
         feature_sources=sources,
         c_grid=c_grid,

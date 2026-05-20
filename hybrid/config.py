@@ -50,8 +50,9 @@ class HybridPathConfig:
 @dataclass
 class HybridMLPConfig:
     seed: int = 234
-    batch_size: int = 64          # было 128; на 1404 примерах 11 батчей мало → 22 батча
-    learning_rate: float = 3e-4
+    batch_size: int = 64
+    # v14: возврат к v3-проверенному lr=1e-4 (3e-4 разрушал обучение на custom)
+    learning_rate: float = 1e-4
     patience: int = 8
     weight_decay: float = 1e-2
     epochs: int = 40
@@ -67,18 +68,19 @@ class HybridMLPConfig:
 
     mixup_alpha: float = 0.2
 
-    # Новое в v13: warmup и max_grad_norm
-    warmup_epochs: int = 5
+    # v14: мягкий warmup — 2 эпохи вместо 5
+    warmup_epochs: int = 2
     max_grad_norm: float = 1.0
 
 
 # -----------------------------------------------------------------------------
 # MLP-профили. Дефолт = noisy (проверенный, даёт 0.51 на custom_embedder).
+# v14: noisy откатили к v3-настройкам — lr=1e-4, мягкий warmup 2 эпохи.
 # -----------------------------------------------------------------------------
 HYBRID_MLP_PROFILES = {
     "noisy": dict(
         batch_size=64,
-        learning_rate=3e-4,
+        learning_rate=1e-4,          # было 3e-4 → разрушало обучение
         weight_decay=1e-2,
         epochs=40,
         patience=8,
@@ -89,12 +91,12 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.05,
         mixup_alpha=0.2,
         use_class_weight=True,
-        warmup_epochs=5,
+        warmup_epochs=2,             # было 5 → слишком долгий разгон
         max_grad_norm=1.0,
     ),
     "clean": dict(
         batch_size=64,
-        learning_rate=2e-4,
+        learning_rate=1e-4,          # было 2e-4
         weight_decay=5e-3,
         epochs=30,
         patience=6,
@@ -105,13 +107,13 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.0,
         mixup_alpha=0.0,
         use_class_weight=False,
-        warmup_epochs=3,
+        warmup_epochs=2,             # было 3
         max_grad_norm=1.0,
     ),
     # экспериментальный — пока с дефолта снят
     "custom": dict(
         batch_size=64,
-        learning_rate=3e-4,
+        learning_rate=1e-4,          # было 3e-4
         weight_decay=1e-2,
         epochs=40,
         patience=10,
@@ -122,7 +124,7 @@ HYBRID_MLP_PROFILES = {
         label_smoothing=0.03,
         mixup_alpha=0.1,
         use_class_weight=True,
-        warmup_epochs=5,
+        warmup_epochs=2,             # было 5
         max_grad_norm=1.0,
     ),
 }

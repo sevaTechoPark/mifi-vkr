@@ -13,8 +13,9 @@ BASE_MODEL_NAME: str = _emb.base_model_name
 TEXT_COLUMN: str = "text"
 LABEL_COLUMN: str = "label"
 
-# Дефолтный метод. Доступно: "centroid" | "nearest" | "centroid_nn"
-METHOD: str = "centroid"
+# Дефолтный метод. Доступно: "all" | "centroid" | "nearest" | "centroid_nn"
+# v14: дефолт = "all" — прогон всех методов одной командой (по аналогии с hybrid classical).
+METHOD: str = "all"
 
 MAX_LENGTH: int = _emb.max_length
 CHUNK_SIZE: int = _emb.chunk_size

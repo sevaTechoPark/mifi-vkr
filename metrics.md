@@ -66,117 +66,97 @@
 
 ----
 
-Мои новые метрики дляtrain.csv:
+было на датасете train.csv:
+[custom_embeder] --noisy mlp {'balanced_accuracy': 0.511481, 'macro_f1': 0.503916}
+[custom_embeder] --clean mlp {'balanced_accuracy': 0.420657, 'macro_f1': 0.456348}
+[default] --noisy mlp {'balanced_accuracy': 0.277828, 'macro_f1': 0.26883}
+[default] --clean mlp {'balanced_accuracy': 0.281334, 'macro_f1': 0.328663}
+[custom_embeder] classical linear_svc: {'balanced_accuracy': 0.533544, 'macro_f1': 0.500058}
+[custom_embeder] classical logreg: {'balanced_accuracy': 0.54235, 'macro_f1': 0.493934}
+[default] classical linear_svc: {'balanced_accuracy': 0.341969, 'macro_f1': 0.314718}
+[default] classical logreg: {'balanced_accuracy': 0.274202, 'macro_f1': 0.196601}
 
---bert-weight 1.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.417238, 'macro_f1': 0.433428}
-logreg: {'balanced_accuracy': 0.389017, 'macro_f1': 0.412037}
-ridge_classifier: {'balanced_accuracy': 0.419375, 'macro_f1': 0.432663}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.43664, 'macro_f1': 0.492182}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.390154, 'macro_f1': 0.439314}
-* [default] hybrid classical
-linear_svc: {'balanced_accuracy': 0.259641, 'macro_f1': 0.263827}
-logreg: {'balanced_accuracy': 0.131756, 'macro_f1': 0.108775}
-ridge_classifier: {'balanced_accuracy': 0.226946, 'macro_f1': 0.236813}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [default] hybrid mlp noisy {'balanced_accuracy': 0.274033, 'macro_f1': 0.328513}
-* [default] hybrid mlp clean {'balanced_accuracy': 0.203026, 'macro_f1': 0.246099}
---bert-weight 2.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438792}
-logreg: {'balanced_accuracy': 0.389017, 'macro_f1': 0.409166}
-ridge_classifier: {'balanced_accuracy': 0.425715, 'macro_f1': 0.440789}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.469919, 'macro_f1': 0.510649}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.318495, 'macro_f1': 0.415975}
---bert-weight 3.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438707}
-logreg: {'balanced_accuracy': 0.389017, 'macro_f1': 0.408866}
-ridge_classifier: {'balanced_accuracy': 0.425715, 'macro_f1': 0.440789}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.404688, 'macro_f1': 0.404226}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.375578, 'macro_f1': 0.405228}
---bert-weight 4.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438707}
-logreg: {'balanced_accuracy': 0.392104, 'macro_f1': 0.411287}
-ridge_classifier: {'balanced_accuracy': 0.425715, 'macro_f1': 0.440789}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.531178, 'macro_f1': 0.526613}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.383746, 'macro_f1': 0.440861}
---bert-weight 5.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438707}
-logreg: {'balanced_accuracy': 0.392104, 'macro_f1': 0.411287}
-ridge_classifier: {'balanced_accuracy': 0.411826, 'macro_f1': 0.421572}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.511481, 'macro_f1': 0.503916}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.420657, 'macro_f1': 0.456348}
---bert-weight 6.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438707}
-logreg: {'balanced_accuracy': 0.391486, 'macro_f1': 0.4098}
-ridge_classifier: {'balanced_accuracy': 0.411826, 'macro_f1': 0.421572}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.344328, 'macro_f1': 0.479895}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.35538, 'macro_f1': 0.435689}
---bert-weight 7.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.427906, 'macro_f1': 0.435856}
-logreg: {'balanced_accuracy': 0.391486, 'macro_f1': 0.4098}
-ridge_classifier: {'balanced_accuracy': 0.411826, 'macro_f1': 0.421572}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.483271, 'macro_f1': 0.473512}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.400315, 'macro_f1': 0.429637}
---bert-weight 10.0:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.427906, 'macro_f1': 0.435856}
-logreg: {'balanced_accuracy': 0.391486, 'macro_f1': 0.4098}
-ridge_classifier: {'balanced_accuracy': 0.411826, 'macro_f1': 0.421572}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.439726, 'macro_f1': 0.503697}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.386329, 'macro_f1': 0.438586}
+было на датасете train.csv:
+[custom_embeder] cosine_similarity centroid balanced_accuracy: 0.564518, macro_f1: 0.498997
+[custom_embeder] cosine_similarity nearest balanced_accuracy: 0.476479, macro_f1: 0.475520
+[default] cosine_similarity centroid balanced_accuracy: 0.125010, macro_f1: 0.094988
+[default] cosine_similarity nearest balanced_accuracy: 0.176384, macro_f1: 0.177300
 
-Без указания --bert-weight:
-* [custom_embeder] hybrid classical
-linear_svc: {'balanced_accuracy': 0.429295, 'macro_f1': 0.438707}
-logreg: {'balanced_accuracy': 0.392104, 'macro_f1': 0.411287}
-ridge_classifier: {'balanced_accuracy': 0.411826, 'macro_f1': 0.421572}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [custom_embeder] hybrid mlp noisy {'balanced_accuracy': 0.473958, 'macro_f1': 0.501036}
-* [custom_embeder] hybrid mlp clean {'balanced_accuracy': 0.415077, 'macro_f1': 0.43839}
-* [default] hybrid classical
-linear_svc: {'balanced_accuracy': 0.259641, 'macro_f1': 0.263827}
-logreg: {'balanced_accuracy': 0.131756, 'macro_f1': 0.108775}
-ridge_classifier: {'balanced_accuracy': 0.226946, 'macro_f1': 0.236813}
-multinomial_nb_tfidf_only: {'balanced_accuracy': 0.103561, 'macro_f1': 0.091129}
-complement_nb_tfidf_only: {'balanced_accuracy': 0.321283, 'macro_f1': 0.348292}
-logreg_tfidf_only: {'balanced_accuracy': 0.198756, 'macro_f1': 0.204418}
-* [default] hybrid mlp noisy {'balanced_accuracy': 0.277828, 'macro_f1': 0.26883}
-* [default] hybrid mlp clean {'balanced_accuracy': 0.281334, 'macro_f1': 0.328663}
+было на датасете train_augmented.csv:
+[custom_embeder] cosine_similarity centroid balanced_accuracy: 0.475639, macro_f1: 0.470315
+[custom_embeder] cosine_similarity nearest balanced_accuracy: 0.475877, macro_f1: 0.487425
+[default] cosine_similarity centroid balanced_accuracy: 0.102992, macro_f1: 0.102776
+[default] cosine_similarity nearest balanced_accuracy: 0.197040, macro_f1: 0.186326
+----
 
-Мои метрики для mlp меня устраивают, только поясни все же когда у hybrid mlp использовать --profile clean а когда noisy ? исходя из прошлых метрик и текущих я запутался.
-Но меня категорически не устраивают hybrid classical
+COSINE:
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train.csv \
+  --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
+
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
+  --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
+
+# запуск на датасете train.csv на дефолтных эмбедингах
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train.csv \
+  --test ~/papadyk-vkr/data/test.csv
+
+# запуск на датасете train_augmented.csv на дефолтных эмбедингах
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
+  --test ~/papadyk-vkr/data/test.csv  
+
+HYBRID:
+
+# сборка векторов на кастомных эмбедингах на датасете train.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
+
+# сборка векторов на кастомных эмбедингах на датасете train_augmented.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
+
+# сборка векторов на дефолтных эмбедингах на датасете train.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-default-train
+
+# сборка векторов на дефолтных эмбедингах на датасете train_augmented.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+# запуск на датасете train.csv с дефолтными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train
+# запуск на датасете train_augmented.csv с дефолтными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+# запуск на датасете train.csv с дефолтными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train
+# запуск на датасете train_augmented.csv с дефолтными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented
+
+----

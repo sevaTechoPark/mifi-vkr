@@ -39,6 +39,8 @@ python -m utils.merge_augmentations \
 
 ## Суммаризация
 
+Суммаризация не дала прироста, поэтому можно её не запускать.
+
 ```
 python -m text_summarization.main \
    --input-path=~/papadyk-vkr/data/train_augmented.csv \
@@ -56,14 +58,25 @@ python -m text_summarization.main \
 
 # Fine-tuned BERT для построение embeddings
 
-mkdir -p ~/papadyk-vkr/bert-embeddings-out
 
+mkdir -p ~/papadyk-vkr/bert-embeddings-out-train
+mkdir -p ~/papadyk-vkr/bert-embeddings-out-train-augmented
+
+Для датасета train.csv:
+```
+python -m bert_embeddings.main \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/bert-embeddings-out-train
+```
+
+Для датасета train_augmented.csv:
 ```
 python -m bert_embeddings.main \
   --train-file ~/papadyk-vkr/data/train_augmented.csv \
   --test-file ~/papadyk-vkr/data/test.csv \
-  --output-dir ~/papadyk-vkr/bert-embeddings-out
-  ```
+  --output-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
+```
 
 # Классификация
 
@@ -79,48 +92,69 @@ python baseline.py \
 
 Построение композитнных векторов:
 
+Для датасета train.csv:
+```
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
+```
+
+Для датасета train_augmented.csv:
 ```
 python -m hybrid.main build \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --output-dir ~/papadyk-vkr/data/hybrid_vec \
-  --model-dir ~/papadyk-vkr/bert-embeddings-out
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
 ```
 
-Можно запускать эти два блока параллельно.  
+### Классические модели:
 
-Классические модели:
-
+Для датасета train.csv:
 ```
 python -m hybrid.main classical \
-  --vecdir ~/papadyk-vkr/data/hybrid_vec
+  --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
 ```
 
-MLP:
+Для датасета train_augmented.csv:
+```
+python -m hybrid.main classical \
+  --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+```
 
+### MLP:
+
+Для датасета train.csv:
 ```
 python -m hybrid.main mlp \
-  --vecdir ~/papadyk-vkr/data/hybrid_vec \
-  --epochs 40 \
-  --profile clean
+  --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
+```
+
+Для датасета train_augmented.csv:
+```
+python -m hybrid.main mlp \
+  --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
 ```
 
 ## III Косинусное расстоение
 
+Для датасета train.csv:
 ```
 python -m cosine_similarity_classification.main \
-  --train ~/papadyk-vkr/data/train_augmented.csv \
+  --train ~/papadyk-vkr/data/train.csv \
   --test ~/papadyk-vkr/data/test.csv \
-  --method centroid \
-  --model-dir ~/papadyk-vkr/bert-embeddings-out
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
 ```
 
+Для датасета train_augmented.csv:
 ```
 python -m cosine_similarity_classification.main \
   --train ~/papadyk-vkr/data/train_augmented.csv \
   --test ~/papadyk-vkr/data/test.csv \
   --method nearest \
-   --model-dir ~/papadyk-vkr/bert-embeddings-out
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
 ```
 
 ## IV Классификация бертом
@@ -135,3 +169,89 @@ python -m bert_classification.main \
   --test-file ~/papadyk-vkr/data/test.csv \
   --output-dir ~/papadyk-vkr/bert-classification-out
 ```
+
+----
+
+HYBRID:
+
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid_vec_custom \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out
+
+  python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid_vec_baseline
+
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid_vec_custom
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid_vec_custom
+
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid_vec_baseline
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid_vec_baseline
+
+COSINE:
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train.csv \
+  --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
+
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train_augmented.csv \
+  --test ~/papadyk-vkr/data/test.csv \
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
+
+# запуск на дефолтных эмбедингах
+python -m cosine_similarity_classification.main \
+  --train ~/papadyk-vkr/data/train.csv \
+  --test ~/papadyk-vkr/data/test.csv \
+
+HYBRID:
+
+# сборка векторов на кастомных эмбедингах на датасете train.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train
+  --model-dir ~/papadyk-vkr/bert-embeddings-out-train
+
+# сборка векторов на кастомных эмбедингах на датасете train_augmented.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+    --model-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
+
+# сборка векторов на дефолтных эмбедингах на датасете train.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-default-train
+
+# сборка векторов на дефолтных эмбедингах на датасете train_augmented.csv
+python -m hybrid.main build \
+  --train-file ~/papadyk-vkr/data/train_augmented.csv \
+  --test-file  ~/papadyk-vkr/data/test.csv \
+  --output-dir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+# запуск на датасете train.csv с дефолтными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train
+# запуск на датасете train_augmented.csv с дефолтными эмбедингами
+python -m hybrid.main classical --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented
+
+# запуск на датасете train.csv с его кастомными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train
+# запуск на датасете train_augmented.csv с его кастомными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-custom-train-augmented
+# запуск на датасете train.csv с дефолтными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train
+# запуск на датасете train_augmented.csv с дефолтными эмбедингами
+python -m hybrid.main mlp --vecdir ~/papadyk-vkr/data/hybrid-vec-default-train-augmented

@@ -1,5 +1,5 @@
 """
-hybrid/hybrid_mlp.py — v20
+hybrid/hybrid_mlp.py — v20.1
 
 Возврат к проверенной v3-архитектуре (StrongMLP + ResidualBlock + Mixup в feature space
 + FocalLoss + balanced class_weight + CosineAnnealingLR без warmup), на которой
@@ -498,7 +498,7 @@ def run_mlp(
         "input_dim": int(X_train.shape[1]),
         "seed": cfg.seed,
         "n_params": int(n_params),
-        "v20_notes": "v19 + batch_size 128→64 + patience 8→12 (стабилизация mixup, без обрыва на augmented)",
+        "v20_1_notes": "v19 + только patience 8→12 (bs=128 оставлен, v20 с bs=64 показал f1=0.02 — откат)",
         "per_class_f1_on_best": per_class_f1_dict,
         "history": history,
         "config_full": {

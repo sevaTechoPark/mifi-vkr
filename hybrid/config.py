@@ -1,13 +1,15 @@
 """
-hybrid/config.py — v20
+hybrid/config.py — v20.1 (откат части a)
 
 Возврат HybridMLPConfig к v3-проверенным дефолтам, на которых были метрики:
   [custom_embeder] noisy → balanced_accuracy=0.5115, macro_f1=0.5039
   [default]        noisy → balanced_accuracy=0.2778, macro_f1=0.2688
 
-Главные изменения относительно v19:
-  - batch_size: 128 → 64 (22 батча/эпоху на train вместо 11, гасит mixup-шум)
+Главные изменения относительно v19 (v20.1 — после неудачного v20):
   - patience: 8 → 12 (на augmented v19 останавливался на epoch 5-13 — слишком рано)
+  - batch_size: ОСТАВЛЕН 128 (v20 пробовал bs=64 — это разломало обучение,
+    f1 упал до 0.02. v3 не зря был на 128: на bs=64 при focal+balanced+mixup
+    градиенты слишком шумные на 1404 примерах × 36 классов.)
   - Архитектура и лосс не меняются.
 
 Главные изменения относительно v18:
@@ -84,7 +86,7 @@ class HybridMLPConfig:
     seed: int = 234
 
     # Обучение
-    batch_size: int = 64          # v20: 128 → 64, чтобы было 22 батча/эпоху на train
+    batch_size: int = 128         # v20.1: оставлен 128 (как v3); bs=64 в v20 ломал обучение
     learning_rate: float = 3e-4
     patience: int = 12            # v20: 8 → 12, чтобы augmented не обрывался рано
     weight_decay: float = 1e-2
@@ -122,7 +124,7 @@ class HybridMLPConfig:
 # -----------------------------------------------------------------------------
 HYBRID_MLP_PROFILES = {
     "noisy": dict(
-        batch_size=64,   # v20: 128 → 64
+        batch_size=128,  # v20.1: оставлен 128 (v3-проверенный)
         learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,
@@ -152,7 +154,7 @@ HYBRID_MLP_PROFILES = {
         max_grad_norm=1.0,
     ),
     "custom": dict(
-        batch_size=64,   # v20: синхронно с noisy
+        batch_size=128,  # v20.1: синхронно с noisy (откат)
         learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,

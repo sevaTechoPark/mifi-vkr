@@ -1,11 +1,36 @@
+"""
+hybrid/hybrid_mlp.py — v19
+
+Возврат к проверенной v3-архитектуре (StrongMLP + ResidualBlock + Mixup в feature space
++ FocalLoss + balanced class_weight + CosineAnnealingLR без warmup), на которой
+исторически были метрики:
+  [custom_embeder] noisy  → balanced_accuracy=0.5115, macro_f1=0.5039
+  [custom_embeder] clean  → balanced_accuracy=0.4207, macro_f1=0.4563
+  [default]        noisy  → balanced_accuracy=0.2778, macro_f1=0.2688
+  [default]        clean  → balanced_accuracy=0.2813, macro_f1=0.3287
+
+Что выкинуто относительно v18 (после диагностики — это давало коллапс в majority-class):
+  - SimpleHeadMLP (270K parameters) — слабая ёмкость для 36 классов, в проде валится в 1-5 классов
+  - warmup (5 эпох) перед cosine с пиком 3e-4 — на 22 батчах epoch_length=22 «прыгает» loss с 8→3→2
+  - retry-логика (3 попытки с lr×0.333 и lr×0.1) — лечила симптом, не причину
+  - smoothed class_weights (cw**0.5) — искажает balanced
+  - sqrt(dim) feature rescale для bert_only — не нужно при правильном scheduler
+
+Что сохранено из v15+ (полезные обёртки, не влияющие на качество):
+  - feature_source ("hybrid" | "bert_only") — выбор источника фич
+  - Имя файла: mlp-results-<basename(vecdir)>-<YYYY-MM-DDTHH-MM>.json
+  - Pretty-имя модели в логе: "MLP-StrongMLP[<features>] profile=<name>"
+  - --features CLI-аргумент
+  - В JSON сохраняется per_class_f1 на лучшей эпохе
+
+Дефолтный feature_source = "hybrid" (как в v3, где и получались 0.5039).
+"""
+
 import os
 import json
 import argparse
 import warnings
-import random
-import copy
 from datetime import datetime
-from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -17,7 +42,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import balanced_accuracy_score, f1_score
-from sklearn.preprocessing import LabelEncoder, normalize
+from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 
 from .config import (
@@ -30,16 +55,24 @@ from .config import (
 )
 
 
-def _seed_everything(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
+# ----------------------------------------------------------------------------- 
+# Seeding
+# -----------------------------------------------------------------------------
+def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
+    np.random.seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if torch.backends.mps.is_available():
+        try:
+            torch.mps.manual_seed(seed)
+        except Exception:
+            pass
 
 
+# -----------------------------------------------------------------------------
+# Dataset
+# -----------------------------------------------------------------------------
 class DenseDataset(Dataset):
     def __init__(self, X, y):
         self.X = X.astype(np.float32)
@@ -52,6 +85,9 @@ class DenseDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 
+# -----------------------------------------------------------------------------
+# Архитектура — v3 StrongMLP (input_proj → N×ResidualBlock → head)
+# -----------------------------------------------------------------------------
 class ResidualBlock(nn.Module):
     def __init__(self, dim: int, dropout: float):
         super().__init__()
@@ -76,7 +112,6 @@ class ResidualBlock(nn.Module):
 
 
 class StrongMLP(nn.Module):
-    """Старая архитектура — остаётся для hybrid features."""
     def __init__(self, input_dim, num_classes, hidden_dim, num_blocks, dropout):
         super().__init__()
         self.input_proj = nn.Sequential(
@@ -106,58 +141,9 @@ class StrongMLP(nn.Module):
         return self.head(features)
 
 
-class SimpleHeadMLP(nn.Module):
-    """
-    v18: простая голова — оптимально для bert_only при 1404 примерах.
-
-    Архитектура: LayerNorm → Linear(input, hidden) → GELU → Dropout → Linear(hidden, num_classes)
-    Параметров ~270K (при hidden=256, input=1024, классов=36) вместо ~10M у StrongMLP.
-    """
-    def __init__(self, input_dim, num_classes, hidden_dim, dropout):
-        super().__init__()
-        self.norm = nn.LayerNorm(input_dim)
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.act = nn.GELU()
-        self.drop = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
-
-    def forward_features(self, x):
-        x = self.norm(x)
-        x = self.fc1(x)
-        x = self.act(x)
-        return x
-
-    def forward(self, x):
-        features = self.forward_features(x)
-        features = self.drop(features)
-        return self.fc2(features)
-
-
-def _build_model(input_dim, num_classes, cfg, use_simple_head: bool):
-    """v18: выбор архитектуры. По умолчанию SimpleHeadMLP для bert_only."""
-    if use_simple_head:
-        # Меньший hidden и dropout для простой головы
-        simple_hidden = min(cfg.hidden_dim, 256)
-        simple_dropout = min(cfg.dropout, 0.2)
-        print(f"[hybrid_mlp][v18] using SimpleHeadMLP "
-              f"(hidden={simple_hidden}, dropout={simple_dropout})")
-        return SimpleHeadMLP(
-            input_dim=input_dim,
-            num_classes=num_classes,
-            hidden_dim=simple_hidden,
-            dropout=simple_dropout,
-        )
-    print(f"[hybrid_mlp] using StrongMLP "
-          f"(hidden={cfg.hidden_dim}, num_blocks={cfg.num_blocks}, dropout={cfg.dropout})")
-    return StrongMLP(
-        input_dim=input_dim,
-        num_classes=num_classes,
-        hidden_dim=cfg.hidden_dim,
-        num_blocks=cfg.num_blocks,
-        dropout=cfg.dropout,
-    )
-
-
+# -----------------------------------------------------------------------------
+# FocalLoss + Mixup в feature-space (как в v3)
+# -----------------------------------------------------------------------------
 class FocalLoss(nn.Module):
     def __init__(self, alpha=None, gamma=1.0, label_smoothing=0.05):
         super().__init__()
@@ -178,10 +164,13 @@ class FocalLoss(nn.Module):
 
 
 def _mixup_features(features, targets, alpha, num_classes):
+    """Mixup на скрытом представлении (после input_proj). Возвращает (mixed_features, soft_targets)."""
     if alpha <= 0.0:
         return features, F.one_hot(targets, num_classes=num_classes).float()
-    lam = np.random.beta(alpha, alpha)
+
+    lam = float(np.random.beta(alpha, alpha))
     idx = torch.randperm(features.size(0), device=features.device)
+
     mixed_features = lam * features + (1 - lam) * features[idx]
     y_a = F.one_hot(targets, num_classes=num_classes).float()
     y_b = F.one_hot(targets[idx], num_classes=num_classes).float()
@@ -190,13 +179,17 @@ def _mixup_features(features, targets, alpha, num_classes):
 
 
 def _soft_cross_entropy(logits, soft_targets, class_weight=None):
+    """CE для soft-targets (после mixup). class_weight применяется per-class к log-prob."""
     log_probs = F.log_softmax(logits, dim=-1)
     if class_weight is not None:
         log_probs = log_probs * class_weight.unsqueeze(0)
     return -(soft_targets * log_probs).sum(dim=-1).mean()
 
 
-def _evaluate(model, loader, device, labels_all=None, return_preds=False):
+# -----------------------------------------------------------------------------
+# Evaluation
+# -----------------------------------------------------------------------------
+def _evaluate(model, loader, device, labels_all=None, return_per_class=False):
     model.eval()
     all_preds, all_true = [], []
     with torch.no_grad():
@@ -211,19 +204,30 @@ def _evaluate(model, loader, device, labels_all=None, return_preds=False):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
         warnings.simplefilter("ignore", category=UndefinedMetricWarning)
-        f1 = f1_score(all_true, all_preds, average="macro", zero_division=0, labels=labels_all)
+        f1 = f1_score(
+            all_true, all_preds,
+            average="macro", zero_division=0,
+            labels=labels_all,
+        )
+        per_class = None
+        if return_per_class:
+            per_class = f1_score(
+                all_true, all_preds,
+                average=None, zero_division=0,
+                labels=labels_all,
+            )
     metrics = {
         "balanced_accuracy": round(float(balanced_accuracy_score(all_true, all_preds)), 6),
         "macro_f1": round(float(f1), 6),
     }
-    pred_counter = Counter(all_preds)
-    metrics["unique_pred_classes"] = int(len(pred_counter))
-    metrics["top1_pred_share"] = round(float(pred_counter.most_common(1)[0][1] / max(1, len(all_preds))), 4)
-    if return_preds:
-        return metrics, all_true, all_preds
+    if return_per_class:
+        return metrics, [float(round(x, 6)) for x in per_class.tolist()]
     return metrics
 
 
+# -----------------------------------------------------------------------------
+# Device
+# -----------------------------------------------------------------------------
 def _resolve_device(device):
     if device is None:
         if torch.cuda.is_available():
@@ -241,48 +245,27 @@ def _resolve_device(device):
     return torch.device(name)
 
 
-def _sanitize_features(X: np.ndarray, name: str) -> np.ndarray:
-    X = np.asarray(X, dtype=np.float32)
-    n_nan = int(np.isnan(X).sum())
-    n_inf = int(np.isinf(X).sum())
-    if n_nan or n_inf:
-        print(f"[hybrid_mlp][WARN] {name}: NaN={n_nan}, Inf={n_inf} — заменяю на 0.0")
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    rms = float(np.sqrt(np.mean(X.astype(np.float64) ** 2))) if X.size else 0.0
-    print(f"[hybrid_mlp] {name}: shape={X.shape} min={X.min():.4f} "
-          f"max={X.max():.4f} mean={X.mean():.4f} rms={rms:.4f}")
-    return X
-
-
-def _rescale_for_mlp(X_train: np.ndarray, X_test: np.ndarray, tag: str):
-    scale = float(np.sqrt(X_train.shape[1]))
-    X_train = (X_train * scale).astype(np.float32)
-    X_test = (X_test * scale).astype(np.float32)
-    rms = float(np.sqrt(np.mean(X_train.astype(np.float64) ** 2)))
-    print(f"[hybrid_mlp][v17] {tag}: rescaled by sqrt(dim)={scale:.2f} → rms_train={rms:.3f}")
-    return X_train, X_test
-
-
+# -----------------------------------------------------------------------------
+# Загрузка фич (hybrid TF-IDF+BERT либо только BERT)
+# -----------------------------------------------------------------------------
 def _load_features(vecdir: str, feature_source: str):
+    """
+    feature_source:
+      - "hybrid"    → X_train_dense.npy (если есть, после SVD) или X_train_hybrid.npz (TF-IDF+BERT)
+      - "bert_only" → X_train_bert.npy / X_test_bert.npy (только BERT-эмбеддинги, 1024-dim)
+    """
     if feature_source == "bert_only":
-        bert_train = os.path.join(vecdir, "X_train_bert.npy")
-        bert_test = os.path.join(vecdir, "X_test_bert.npy")
-        if not (os.path.exists(bert_train) and os.path.exists(bert_test)):
+        ftr = os.path.join(vecdir, "X_train_bert.npy")
+        fte = os.path.join(vecdir, "X_test_bert.npy")
+        if not (os.path.exists(ftr) and os.path.exists(fte)):
             raise FileNotFoundError(
                 f"feature_source='bert_only' требует файлов:\n"
-                f"  {bert_train}\n"
-                f"  {bert_test}\n"
-                f"Они создаются на этапе `python -m hybrid.main build`. "
-                f"Перестрой векторы или используй --features hybrid."
+                f"  {ftr}\n  {fte}\n"
+                f"Их не нашёл. Используй feature_source='hybrid' или сгенерируй bert-only фичи."
             )
-        X_train = np.load(bert_train).astype(np.float32)
-        X_test = np.load(bert_test).astype(np.float32)
-        X_train = _sanitize_features(X_train, "X_train_bert(raw)")
-        X_test = _sanitize_features(X_test, "X_test_bert(raw)")
-        X_train = normalize(X_train, norm="l2", axis=1).astype(np.float32)
-        X_test = normalize(X_test, norm="l2", axis=1).astype(np.float32)
-        print(f"[hybrid_mlp] features='bert_only' (dense, L2-renorm) dim={X_train.shape[1]}")
-        X_train, X_test = _rescale_for_mlp(X_train, X_test, tag="bert_only")
+        X_train = np.load(ftr).astype(np.float32)
+        X_test = np.load(fte).astype(np.float32)
+        print(f"[hybrid_mlp] using BERT-ONLY features: dim={X_train.shape[1]}")
         return X_train, X_test
 
     if feature_source == "hybrid":
@@ -291,273 +274,64 @@ def _load_features(vecdir: str, feature_source: str):
         if os.path.exists(dense_train) and os.path.exists(dense_test):
             X_train = np.load(dense_train).astype(np.float32)
             X_test = np.load(dense_test).astype(np.float32)
-            print(f"[hybrid_mlp] features='hybrid' (DENSE/SVD) dim={X_train.shape[1]}")
-        else:
-            X_train = sp.load_npz(os.path.join(vecdir, "X_train_hybrid.npz")).astype(np.float32).toarray()
-            X_test = sp.load_npz(os.path.join(vecdir, "X_test_hybrid.npz")).astype(np.float32).toarray()
-            print(f"[hybrid_mlp] features='hybrid' (SPARSE→DENSE) dim={X_train.shape[1]}")
-        X_train = _sanitize_features(X_train, "X_train_hybrid")
-        X_test = _sanitize_features(X_test, "X_test_hybrid")
-        rms_tr = float(np.sqrt(np.mean(X_train.astype(np.float64) ** 2)))
-        if 0 < rms_tr < 0.5:
-            scale = 1.0 / rms_tr
-            X_train = (X_train * scale).astype(np.float32)
-            X_test = (X_test * scale).astype(np.float32)
-            print(f"[hybrid_mlp][v17] hybrid: rms was {rms_tr:.4f} → rescaled by {scale:.2f}")
+            print(f"[hybrid_mlp] using DENSE (SVD) hybrid features: dim={X_train.shape[1]}")
+            return X_train, X_test
+        sparse_train = os.path.join(vecdir, "X_train_hybrid.npz")
+        sparse_test = os.path.join(vecdir, "X_test_hybrid.npz")
+        if not (os.path.exists(sparse_train) and os.path.exists(sparse_test)):
+            raise FileNotFoundError(
+                f"feature_source='hybrid' требует файлов:\n"
+                f"  {sparse_train} или {dense_train}\n"
+                f"  {sparse_test} или {dense_test}"
+            )
+        X_train = sp.load_npz(sparse_train).astype(np.float32).toarray()
+        X_test = sp.load_npz(sparse_test).astype(np.float32).toarray()
+        print(f"[hybrid_mlp] using SPARSE→DENSE hybrid features: dim={X_train.shape[1]}")
         return X_train, X_test
 
     raise ValueError(
         f"Unknown feature_source={feature_source!r}. "
-        f"Allowed: {HYBRID_MLP_FEATURE_SOURCES}"
+        f"Allowed: {list(HYBRID_MLP_FEATURE_SOURCES)}"
     )
-
-
-def _smoothed_class_weights(y_train_enc: np.ndarray, num_classes: int,
-                            power: float = 0.5) -> np.ndarray:
-    raw = compute_class_weight(
-        class_weight="balanced",
-        classes=np.arange(num_classes),
-        y=y_train_enc,
-    )
-    smoothed = np.power(raw, power)
-    smoothed = smoothed / smoothed.mean()
-    print(f"[hybrid_mlp][v17] class_weights smoothed (power={power}): "
-          f"raw[{raw.min():.2f}..{raw.max():.2f}] → "
-          f"smoothed[{smoothed.min():.2f}..{smoothed.max():.2f}]")
-    return smoothed
 
 
 # -----------------------------------------------------------------------------
-# v18: один train-attempt — обёрнут в _train_attempt для retry
+# Главная функция: один запуск (v3-логика, без retry)
 # -----------------------------------------------------------------------------
-def _train_attempt(
-    X_train, X_test, y_train_enc, y_test_enc,
-    num_classes, labels_all, le, cw_device,
-    cfg, n_epochs, device, feature_source,
-    use_simple_head: bool,
-    lr_multiplier: float = 1.0,
-    seed_offset: int = 0,
-    attempt_idx: int = 0,
-):
-    """
-    Одна попытка обучения. Возвращает (best_metrics, best_epoch, history,
-    final_metrics, per_class, collapsed, best_state).
-
-    collapsed=True если на эпохе COLLAPSE_CHECK_EPOCH модель в одном классе.
-    """
-    COLLAPSE_CHECK_EPOCH = 5
-    COLLAPSE_MIN_CLASSES = 2  # ожидаем хотя бы 2 предсказанных класса
-
-    _seed_everything(cfg.seed + seed_offset)
-
-    train_ds = DenseDataset(X_train, y_train_enc)
-    test_ds = DenseDataset(X_test, y_test_enc)
-
-    pin = (device.type == "cuda")
-    g = torch.Generator()
-    g.manual_seed(cfg.seed + seed_offset)
-    train_loader = DataLoader(
-        train_ds, batch_size=cfg.batch_size, shuffle=True,
-        num_workers=0, pin_memory=pin, generator=g, drop_last=False,
-    )
-    test_loader = DataLoader(
-        test_ds, batch_size=cfg.batch_size, shuffle=False,
-        num_workers=0, pin_memory=pin,
-    )
-
-    model = _build_model(X_train.shape[1], num_classes, cfg, use_simple_head).to(device)
-
-    effective_lr = cfg.learning_rate * lr_multiplier
-    print(f"[hybrid_mlp][v18] attempt={attempt_idx} seed_offset={seed_offset} "
-          f"lr_mult={lr_multiplier} → effective_lr={effective_lr:.2e}")
-
-    criterion = FocalLoss(alpha=cw_device, gamma=cfg.focal_gamma, label_smoothing=cfg.label_smoothing)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=effective_lr,
-        weight_decay=cfg.weight_decay,
-    )
-
-    # v18: warmup ≥ 5 эпох (или n_epochs // 4 — что больше)
-    warmup_epochs = max(5, n_epochs // 4)
-    cfg_warmup = int(getattr(cfg, "warmup_epochs", 0))
-    if cfg_warmup > warmup_epochs:
-        warmup_epochs = min(cfg_warmup, n_epochs // 2)
-    max_warmup = max(1, n_epochs // 2)
-    if warmup_epochs > max_warmup:
-        warmup_epochs = max_warmup
-    base_lr = effective_lr
-    min_lr = cfg.min_lr
-    # v18: clip 0.5 — режем взрывные градиенты в начале
-    max_grad_norm = 0.5
-
-    def _set_lr(epoch_idx):
-        if warmup_epochs > 0 and epoch_idx < warmup_epochs:
-            # v18: warmup стартует с 0.05*base_lr (а не 0.1)
-            warmup_start = base_lr * 0.05
-            warmup_progress = (epoch_idx + 1) / max(1, warmup_epochs)
-            warmup_lr = warmup_start + (base_lr - warmup_start) * warmup_progress
-            for pg in optimizer.param_groups:
-                pg["lr"] = warmup_lr
-            return
-        cosine_epochs = max(1, n_epochs - warmup_epochs)
-        progress = (epoch_idx - warmup_epochs) / cosine_epochs
-        progress = min(max(progress, 0.0), 1.0)
-        cos_lr = min_lr + 0.5 * (base_lr - min_lr) * (1.0 + np.cos(np.pi * progress))
-        for pg in optimizer.param_groups:
-            pg["lr"] = cos_lr
-
-    # v18: skip_first_eval — не отмечаем best в первые 3 эпохи
-    SKIP_FIRST_EVAL = 3
-
-    best_f1 = -1.0
-    best_metrics = None
-    best_epoch = -1
-    best_state = None
-    no_improve = 0
-    epoch = -1
-    history = []
-    collapsed = False
-
-    for epoch in range(n_epochs):
-        _set_lr(epoch)
-        model.train()
-        epoch_losses = []
-        nan_batches = 0
-        for xb, yb in train_loader:
-            xb = xb.to(device, non_blocking=True)
-            yb = yb.to(device, non_blocking=True)
-
-            optimizer.zero_grad(set_to_none=True)
-
-            if cfg.mixup_alpha > 0.0:
-                features = model.forward_features(xb)
-                mixed_features, soft_targets = _mixup_features(
-                    features, yb, alpha=cfg.mixup_alpha, num_classes=num_classes,
-                )
-                # SimpleHeadMLP: forward через dropout + fc2
-                if hasattr(model, "fc2") and not hasattr(model, "head"):
-                    mixed_features = model.drop(mixed_features)
-                    logits = model.fc2(mixed_features)
-                else:
-                    logits = model.head(mixed_features)
-                loss = _soft_cross_entropy(logits, soft_targets, class_weight=cw_device)
-            else:
-                logits = model(xb)
-                loss = criterion(logits, yb)
-
-            if not torch.isfinite(loss):
-                nan_batches += 1
-                continue
-
-            loss.backward()
-            if max_grad_norm and max_grad_norm > 0:
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-            optimizer.step()
-            epoch_losses.append(loss.item())
-
-        metrics = _evaluate(model, test_loader, device, labels_all=labels_all)
-        mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
-        current_lr = optimizer.param_groups[0]["lr"]
-        phase = "warmup" if epoch < warmup_epochs else "cosine"
-        nan_tag = f" nan_batches={nan_batches}" if nan_batches else ""
-        print(f"epoch={epoch + 1} phase={phase} lr={current_lr:.2e} "
-              f"train_loss={mean_loss:.6f} "
-              f"bacc={metrics['balanced_accuracy']:.4f} f1={metrics['macro_f1']:.4f} "
-              f"pred_classes={metrics['unique_pred_classes']}/{num_classes} "
-              f"top1_share={metrics['top1_pred_share']}{nan_tag}")
-
-        history.append({
-            "epoch": epoch + 1,
-            "phase": phase,
-            "lr": round(current_lr, 8),
-            "train_loss": round(mean_loss, 6),
-            **metrics,
-        })
-
-        # v18: collapse-detection на эпохе 5
-        if epoch + 1 == COLLAPSE_CHECK_EPOCH:
-            if metrics["unique_pred_classes"] < COLLAPSE_MIN_CLASSES:
-                print(f"[hybrid_mlp][v18] COLLAPSE detected at epoch {epoch + 1}: "
-                      f"pred_classes={metrics['unique_pred_classes']} < {COLLAPSE_MIN_CLASSES}")
-                collapsed = True
-                break
-
-        # v18: skip_first_eval — не отмечаем best в первые SKIP_FIRST_EVAL эпох
-        if epoch + 1 <= SKIP_FIRST_EVAL:
-            continue
-
-        if metrics["macro_f1"] > best_f1:
-            best_f1 = metrics["macro_f1"]
-            best_metrics = metrics
-            best_epoch = epoch + 1
-            best_state = copy.deepcopy(model.state_dict())
-            no_improve = 0
-        else:
-            no_improve += 1
-            if no_improve >= cfg.patience:
-                print(f"Early stopping at epoch {epoch + 1}")
-                break
-
-    final_metrics = best_metrics or {}
-    per_class = {}
-    if best_state is not None:
-        model.load_state_dict(best_state)
-        final_metrics, y_true, y_pred = _evaluate(
-            model, test_loader, device, labels_all=labels_all, return_preds=True,
-        )
-        print(f"[hybrid_mlp][v18] restored best epoch {best_epoch} → {final_metrics}")
-        per_class_f1 = f1_score(y_true, y_pred, average=None, labels=labels_all, zero_division=0)
-        per_class = {
-            le.classes_[i]: round(float(per_class_f1[i]), 4)
-            for i in range(num_classes)
-        }
-        n_zero = int(sum(1 for v in per_class.values() if v == 0.0))
-        print(f"[hybrid_mlp][v18] per-class f1: zero={n_zero}/{num_classes} классов с f1=0")
-
-    return {
-        "best_metrics": best_metrics,
-        "best_epoch": best_epoch,
-        "best_f1": best_f1,
-        "history": history,
-        "final_metrics": final_metrics,
-        "per_class": per_class,
-        "collapsed": collapsed,
-        "epochs_ran": epoch + 1,
-        "warmup_epochs_used": warmup_epochs,
-        "effective_lr": effective_lr,
-    }
-
-
 def run_mlp(
     vecdir,
     cfg: HybridMLPConfig | None = None,
     epochs: int | None = None,
     device=None,
     feature_source: str = DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
-    simple_head: bool | None = None,
+    simple_head: bool | None = None,  # принимается ради обратной совместимости, игнорируется
 ):
     """
-    v18: simple_head — если None, выбирается автоматически:
-      - bert_only → True (SimpleHeadMLP)
-      - hybrid → False (StrongMLP, как раньше)
+    Один прогон MLP по v3-схеме.
 
-    Дополнительно: collapse-detection с авто-retry до 2 раз (lr/3, новый seed).
+    feature_source:
+      - "hybrid"    (дефолт) — TF-IDF+BERT, hidden_dim≈1024 для custom, ~78к для baseline
+      - "bert_only" — только BERT-эмбеддинги (1024-dim)
+
+    simple_head игнорируется (был в v18, выкинут как нерабочий).
     """
+    if simple_head is not None:
+        # тихое предупреждение, чтобы не ломать старые вызовы
+        print(f"[hybrid_mlp] note: simple_head={simple_head} в v19 игнорируется "
+              f"(возвращена единая архитектура StrongMLP).")
+
     if cfg is None:
         cfg = HybridMLPConfig()
     if feature_source not in HYBRID_MLP_FEATURE_SOURCES:
         raise ValueError(
-            f"feature_source must be one of {HYBRID_MLP_FEATURE_SOURCES}, "
-            f"got {feature_source!r}"
+            f"Unknown feature_source={feature_source!r}. "
+            f"Allowed: {list(HYBRID_MLP_FEATURE_SOURCES)}"
         )
+
     n_epochs = int(epochs) if epochs is not None else int(cfg.epochs)
+    _set_seed(cfg.seed)
 
-    # v18: автовыбор архитектуры
-    if simple_head is None:
-        simple_head = (feature_source == "bert_only")
-    print(f"[hybrid_mlp][v18] simple_head={simple_head} (feature_source={feature_source})")
-
+    # --- 1. данные
     X_train, X_test = _load_features(vecdir, feature_source)
 
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
@@ -569,95 +343,144 @@ def run_mlp(
     num_classes = len(le.classes_)
     labels_all = list(range(num_classes))
 
+    # --- 2. class weights (balanced, как в v3 — БЕЗ smoothing)
     if cfg.use_class_weight:
-        cw = _smoothed_class_weights(y_train_enc, num_classes, power=0.5)
+        cw = compute_class_weight(
+            class_weight="balanced",
+            classes=np.arange(num_classes),
+            y=y_train_enc,
+        )
         class_weights_t = torch.tensor(cw, dtype=torch.float32)
     else:
         class_weights_t = None
 
+    # --- 3. loaders
+    train_ds = DenseDataset(X_train, y_train_enc)
+    test_ds = DenseDataset(X_test, y_test_enc)
+
     device = _resolve_device(device)
+    pin = (device.type == "cuda")
+
+    train_loader = DataLoader(
+        train_ds, batch_size=cfg.batch_size, shuffle=True,
+        num_workers=0, pin_memory=pin,
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=cfg.batch_size, shuffle=False,
+        num_workers=0, pin_memory=pin,
+    )
+
+    # --- 4. модель / loss / optimizer / scheduler (всё как v3)
+    model = StrongMLP(
+        input_dim=X_train.shape[1],
+        num_classes=num_classes,
+        hidden_dim=cfg.hidden_dim,
+        num_blocks=cfg.num_blocks,
+        dropout=cfg.dropout,
+    ).to(device)
+
+    n_params = sum(p.numel() for p in model.parameters())
+    pretty = f"MLP-StrongMLP[{feature_source}]"
+    print(f"[hybrid_mlp] {pretty} | input_dim={X_train.shape[1]} num_classes={num_classes} "
+          f"params={n_params:,}")
+    print(f"[hybrid_mlp] hidden_dim={cfg.hidden_dim} blocks={cfg.num_blocks} dropout={cfg.dropout} "
+          f"lr={cfg.learning_rate} wd={cfg.weight_decay} bs={cfg.batch_size} "
+          f"focal_gamma={cfg.focal_gamma} ls={cfg.label_smoothing} mixup={cfg.mixup_alpha} "
+          f"class_weight={cfg.use_class_weight}")
+
     cw_device = class_weights_t.to(device) if class_weights_t is not None else None
+    criterion = FocalLoss(
+        alpha=cw_device,
+        gamma=cfg.focal_gamma,
+        label_smoothing=cfg.label_smoothing,
+    )
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+    )
+    # ВАЖНО: cosine annealing без warmup — как в v3
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=n_epochs, eta_min=cfg.min_lr,
+    )
 
-    model_name = f"{'SimpleHeadMLP' if simple_head else 'StrongMLP'}[{feature_source}]"
-    print(f"\n=== {model_name} | dim={X_train.shape[1]} | classes={num_classes} ===")
-    print(f"[hybrid_mlp] cfg: lr={cfg.learning_rate} wd={cfg.weight_decay} "
-          f"dropout={cfg.dropout} focal_gamma={cfg.focal_gamma} "
-          f"ls={cfg.label_smoothing} mixup={cfg.mixup_alpha} "
-          f"warmup={cfg.warmup_epochs} epochs={n_epochs} patience={cfg.patience}")
+    # --- 5. обучение
+    best_f1 = -1.0
+    best_metrics = None
+    best_per_class = None
+    best_epoch = -1
+    no_improve = 0
+    epoch = -1
+    history = []
 
-    # v18: до 3 попыток (1 основная + 2 retry). Retry стратегия:
-    #   попытка 0: исходный seed, lr × 1.0
-    #   попытка 1: seed + 1, lr × 0.33
-    #   попытка 2: seed + 2, lr × 0.10
-    attempt_strategies = [
-        {"lr_mult": 1.0, "seed_offset": 0},
-        {"lr_mult": 0.333, "seed_offset": 1},
-        {"lr_mult": 0.1, "seed_offset": 2},
-    ]
+    for epoch in range(n_epochs):
+        model.train()
+        epoch_losses = []
+        for xb, yb in train_loader:
+            xb = xb.to(device, non_blocking=True)
+            yb = yb.to(device, non_blocking=True)
 
-    all_attempts = []
-    best_attempt = None
+            optimizer.zero_grad(set_to_none=True)
 
-    for idx, strat in enumerate(attempt_strategies):
-        print(f"\n{'=' * 60}")
-        print(f"ATTEMPT {idx + 1}/{len(attempt_strategies)}  "
-              f"(lr_mult={strat['lr_mult']}, seed_offset={strat['seed_offset']})")
-        print('=' * 60)
+            if cfg.mixup_alpha > 0.0:
+                features = model.forward_features(xb)
+                mixed_features, soft_targets = _mixup_features(
+                    features, yb, alpha=cfg.mixup_alpha, num_classes=num_classes,
+                )
+                logits = model.head(mixed_features)
+                loss = _soft_cross_entropy(logits, soft_targets, class_weight=cw_device)
+            else:
+                logits = model(xb)
+                loss = criterion(logits, yb)
 
-        result = _train_attempt(
-            X_train, X_test, y_train_enc, y_test_enc,
-            num_classes, labels_all, le, cw_device,
-            cfg, n_epochs, device, feature_source,
-            use_simple_head=simple_head,
-            lr_multiplier=strat["lr_mult"],
-            seed_offset=strat["seed_offset"],
-            attempt_idx=idx,
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.max_grad_norm)
+            optimizer.step()
+            epoch_losses.append(loss.item())
+
+        scheduler.step()
+
+        # на лучшей эпохе попросим ещё per-class f1
+        metrics, per_class = _evaluate(
+            model, test_loader, device, labels_all=labels_all, return_per_class=True,
         )
-        all_attempts.append(result)
+        mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"epoch={epoch + 1:>3} lr={current_lr:.2e} train_loss={mean_loss:.6f} metrics={metrics}")
 
-        if best_attempt is None or result["best_f1"] > best_attempt["best_f1"]:
-            best_attempt = result
-            best_attempt_idx = idx
+        history.append({
+            "epoch": epoch + 1,
+            "lr": current_lr,
+            "train_loss": round(mean_loss, 6),
+            "balanced_accuracy": metrics["balanced_accuracy"],
+            "macro_f1": metrics["macro_f1"],
+        })
 
-        if not result["collapsed"] and result["best_f1"] > 0.05:
-            print(f"[hybrid_mlp][v18] attempt {idx + 1} OK (f1={result['best_f1']:.4f}), "
-                  f"больше не пробуем")
-            break
+        if metrics["macro_f1"] > best_f1:
+            best_f1 = metrics["macro_f1"]
+            best_metrics = metrics
+            best_per_class = per_class
+            best_epoch = epoch + 1
+            no_improve = 0
+        else:
+            no_improve += 1
+            if no_improve >= cfg.patience:
+                print(f"Early stopping at epoch {epoch + 1}")
+                break
 
-    print(f"\n{'=' * 60}")
-    print(f"BEST ATTEMPT: {best_attempt_idx + 1}/{len(all_attempts)}  "
-          f"best_f1={best_attempt['best_f1']:.4f}  "
-          f"collapsed={best_attempt['collapsed']}")
-    print('=' * 60)
+    per_class_f1_dict = None
+    if best_per_class is not None:
+        per_class_f1_dict = {
+            str(cls): score for cls, score in zip(le.classes_, best_per_class)
+        }
 
     results = {
-        "model": model_name,
-        "model_key": "simple_head_mlp" if simple_head else "strong_mlp",
+        "model_name": pretty,
         "feature_source": feature_source,
-        "simple_head": simple_head,
-        "best_epoch": best_attempt["best_epoch"],
-        "best_macro_f1": best_attempt["best_f1"],
-        "best_metrics": best_attempt["best_metrics"],
-        "final_metrics_on_best_weights": best_attempt["final_metrics"],
-        "per_class_f1_on_best_weights": best_attempt["per_class"],
-        "epochs_ran": best_attempt["epochs_ran"],
-        "history": best_attempt["history"],
-        "collapsed": best_attempt["collapsed"],
-        "warmup_epochs_used": best_attempt["warmup_epochs_used"],
-        "effective_lr": best_attempt["effective_lr"],
-        "attempts_summary": [
-            {
-                "attempt_idx": i,
-                "lr_mult": attempt_strategies[i]["lr_mult"],
-                "seed_offset": attempt_strategies[i]["seed_offset"],
-                "best_f1": a["best_f1"],
-                "best_epoch": a["best_epoch"],
-                "collapsed": a["collapsed"],
-                "epochs_ran": a["epochs_ran"],
-            }
-            for i, a in enumerate(all_attempts)
-        ],
-        "best_attempt_idx": best_attempt_idx,
+        "best_epoch": best_epoch,
+        "best_macro_f1": best_f1,
+        "best_metrics": best_metrics,
+        "epochs_ran": epoch + 1,
         "batch_size": cfg.batch_size,
         "lr": cfg.learning_rate,
         "patience": cfg.patience,
@@ -669,19 +492,37 @@ def run_mlp(
         "label_smoothing": cfg.label_smoothing,
         "mixup_alpha": cfg.mixup_alpha,
         "use_class_weight": cfg.use_class_weight,
-        "max_grad_norm": 0.5,
+        "max_grad_norm": cfg.max_grad_norm,
         "device": str(device),
         "num_classes": int(num_classes),
         "input_dim": int(X_train.shape[1]),
         "seed": cfg.seed,
-        "v18_changes": "SimpleHeadMLP for bert_only + collapse-retry (up to 3 attempts)",
+        "n_params": int(n_params),
+        "v19_notes": "v3 StrongMLP + Mixup + FocalLoss + balanced CW + CosineAnnealing (no warmup)",
+        "per_class_f1_on_best": per_class_f1_dict,
+        "history": history,
+        "config_full": {
+            "learning_rate": cfg.learning_rate,
+            "weight_decay": cfg.weight_decay,
+            "epochs": cfg.epochs,
+            "patience": cfg.patience,
+            "hidden_dim": cfg.hidden_dim,
+            "num_blocks": cfg.num_blocks,
+            "dropout": cfg.dropout,
+            "focal_gamma": cfg.focal_gamma,
+            "label_smoothing": cfg.label_smoothing,
+            "mixup_alpha": cfg.mixup_alpha,
+            "use_class_weight": cfg.use_class_weight,
+            "batch_size": cfg.batch_size,
+            "max_grad_norm": cfg.max_grad_norm,
+        },
     }
 
     print("\nBEST RESULT")
-    print(f"  {model_name}: {best_attempt['best_metrics']}")
+    print(f"  {pretty}: {best_metrics}  (epoch {best_epoch})")
 
     vec_base = os.path.basename(os.path.normpath(vecdir)) or "vecdir"
-    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M")
     out_name = f"mlp-results-{vec_base}-{stamp}.json"
     out_path = os.path.join(vecdir, out_name)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -690,6 +531,9 @@ def run_mlp(
     return results
 
 
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
 def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
@@ -706,26 +550,33 @@ def build_argparser():
     parser.add_argument("--focal-gamma", type=float, default=None)
     parser.add_argument("--label-smoothing", type=float, default=None)
     parser.add_argument("--mixup-alpha", type=float, default=None)
-    parser.add_argument("--use-class-weight",
-                        type=lambda v: str(v).lower() in {"true", "1", "yes"},
-                        default=None)
-    parser.add_argument("--warmup-epochs", type=int, default=None)
+    parser.add_argument(
+        "--use-class-weight",
+        type=lambda v: str(v).lower() in {"true", "1", "yes"},
+        default=None,
+    )
     parser.add_argument("--max-grad-norm", type=float, default=None)
-    parser.add_argument("--profile", type=str, default=None,
-                        choices=sorted(HYBRID_MLP_PROFILES.keys()),
-                        help='Профиль гиперпараметров. По умолчанию выбирается от --features.')
+    # warmup-epochs принимаем для обратной совместимости, но игнорируем
+    parser.add_argument(
+        "--warmup-epochs", type=int, default=None,
+        help="DEPRECATED в v19 — игнорируется (CosineAnnealing без warmup как в v3).",
+    )
+    parser.add_argument(
+        "--profile", type=str, default=None,
+        choices=sorted(HYBRID_MLP_PROFILES.keys()),
+        help='Профиль гиперпараметров. По умолчанию выбирается от --features.',
+    )
     parser.add_argument(
         "--features", type=str, default=None,
         choices=list(HYBRID_MLP_FEATURE_SOURCES),
         help=f'Источник фич. По умолчанию: "{DEFAULT_HYBRID_MLP_FEATURE_SOURCE}".',
     )
-    # v18: переключатель архитектуры
+    # принимаем ради совместимости вызова из main.py, в v19 игнорируется
     parser.add_argument(
         "--simple-head",
         type=lambda v: str(v).lower() in {"true", "1", "yes"},
         default=None,
-        help='Использовать SimpleHeadMLP вместо StrongMLP. '
-             'По умолчанию: True для bert_only, False для hybrid.',
+        help="DEPRECATED в v19 — игнорируется (SimpleHeadMLP убран).",
     )
     return parser
 
@@ -748,7 +599,7 @@ def _cfg_from_args(args):
     for name in (
         "seed", "batch_size", "learning_rate", "patience", "weight_decay",
         "hidden_dim", "num_blocks", "dropout", "focal_gamma", "label_smoothing",
-        "mixup_alpha", "use_class_weight", "warmup_epochs", "max_grad_norm",
+        "mixup_alpha", "use_class_weight", "max_grad_norm",
     ):
         val = getattr(args, name, None)
         if val is not None:
@@ -763,9 +614,14 @@ def main():
     args = parser.parse_args()
     print(f"[ARGS] {vars(args)}")
     cfg, feature_source = _cfg_from_args(args)
-    run_mlp(args.vecdir, cfg=cfg, epochs=args.epochs, device=args.device,
-            feature_source=feature_source,
-            simple_head=getattr(args, "simple_head", None))
+    run_mlp(
+        args.vecdir,
+        cfg=cfg,
+        epochs=args.epochs,
+        device=args.device,
+        feature_source=feature_source,
+        simple_head=getattr(args, "simple_head", None),
+    )
 
 
 if __name__ == "__main__":

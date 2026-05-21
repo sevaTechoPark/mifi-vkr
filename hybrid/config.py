@@ -1,9 +1,14 @@
 """
-hybrid/config.py — v19
+hybrid/config.py — v20
 
 Возврат HybridMLPConfig к v3-проверенным дефолтам, на которых были метрики:
   [custom_embeder] noisy → balanced_accuracy=0.5115, macro_f1=0.5039
   [default]        noisy → balanced_accuracy=0.2778, macro_f1=0.2688
+
+Главные изменения относительно v19:
+  - batch_size: 128 → 64 (22 батча/эпоху на train вместо 11, гасит mixup-шум)
+  - patience: 8 → 12 (на augmented v19 останавливался на epoch 5-13 — слишком рано)
+  - Архитектура и лосс не меняются.
 
 Главные изменения относительно v18:
   - DEFAULT_HYBRID_MLP_FEATURE_SOURCE = "hybrid" (было "bert_only" — это и было корнем регрессии)
@@ -79,9 +84,9 @@ class HybridMLPConfig:
     seed: int = 234
 
     # Обучение
-    batch_size: int = 128         # как в v3 (на ~1400 примерах = 11 батчей)
+    batch_size: int = 64          # v20: 128 → 64, чтобы было 22 батча/эпоху на train
     learning_rate: float = 3e-4
-    patience: int = 8
+    patience: int = 12            # v20: 8 → 12, чтобы augmented не обрывался рано
     weight_decay: float = 1e-2
     epochs: int = 40
     min_lr: float = 1e-6
@@ -117,11 +122,11 @@ class HybridMLPConfig:
 # -----------------------------------------------------------------------------
 HYBRID_MLP_PROFILES = {
     "noisy": dict(
-        batch_size=128,
+        batch_size=64,   # v20: 128 → 64
         learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,
-        patience=8,
+        patience=12,     # v20: 8 → 12
         hidden_dim=512,
         num_blocks=2,
         dropout=0.4,
@@ -136,7 +141,7 @@ HYBRID_MLP_PROFILES = {
         learning_rate=2e-4,
         weight_decay=5e-3,
         epochs=30,
-        patience=6,
+        patience=10,     # v20: 6 → 10 (синхронно с noisy)
         hidden_dim=384,
         num_blocks=1,
         dropout=0.2,
@@ -147,11 +152,11 @@ HYBRID_MLP_PROFILES = {
         max_grad_norm=1.0,
     ),
     "custom": dict(
-        batch_size=128,
+        batch_size=64,   # v20: синхронно с noisy
         learning_rate=3e-4,
         weight_decay=1e-2,
         epochs=40,
-        patience=10,
+        patience=12,     # v20: 10 → 12
         hidden_dim=512,
         num_blocks=2,
         dropout=0.3,

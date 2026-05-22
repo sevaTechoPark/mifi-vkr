@@ -1,3 +1,15 @@
+"""Загрузка, очистка и токенизация датасета для классификации.
+
+Pipeline:
+  CSV (train/test) → DataFrame → label2id → label_id → Dataset → токенизация
+  с чанкованием → DatasetDict.
+
+Каждый документ превращается в фиксированное число чанков (model_cfg.max_chunks)
+по model_cfg.max_length токенов. Недостающие чанки добиваются паддингом,
+число валидных чанков сохраняется в поле num_chunks — оно используется
+моделью при усреднении эмбеддингов чанков.
+"""
+
 from typing import Dict, Tuple
 
 import numpy as np
@@ -9,6 +21,7 @@ from transformers import AutoTokenizer
 
 from .config import ModelConfig, DataConfig
 
+# Отключаем кэширование `datasets`: пайплайн быстрый, а файлы кэша занимают место.
 disable_caching()
 
 
@@ -18,17 +31,17 @@ def load_and_prepare_dataframes(
     text_col: str,
     label_col: str,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Читает train/test CSV, оставляет только нужные колонки, чистит пустые строки."""
     train_df = pd.read_csv(train_file)
     test_df = pd.read_csv(test_file)
 
     train_df = train_df[[text_col, label_col]].copy().dropna()
     test_df = test_df[[text_col, label_col]].copy().dropna()
 
-    train_df[text_col] = train_df[text_col].astype(str).str.strip()
-    train_df[label_col] = train_df[label_col].astype(str).str.strip()
-
-    test_df[text_col] = test_df[text_col].astype(str).str.strip()
-    test_df[label_col] = test_df[label_col].astype(str).str.strip()
+    # Приводим к строкам и убираем пробелы по краям.
+    for df in (train_df, test_df):
+        df[text_col] = df[text_col].astype(str).str.strip()
+        df[label_col] = df[label_col].astype(str).str.strip()
 
     train_df = train_df[
         (train_df[text_col] != "") & (train_df[label_col] != "")
@@ -45,6 +58,11 @@ def build_label_mappings(
     test_df: pd.DataFrame,
     label_col: str,
 ):
+    """Строит label2id / id2label по обучающему набору меток.
+
+    Падает с ошибкой, если в тесте встретится метка, не виденная в train —
+    модель такую метку всё равно не сможет предсказать.
+    """
     labels = sorted(train_df[label_col].unique().tolist())
     label2id = {label: i for i, label in enumerate(labels)}
     id2label = {i: label for label, i in label2id.items()}
@@ -62,6 +80,7 @@ def attach_label_ids(
     label_col: str,
     label2id: Dict[str, int],
 ):
+    """Добавляет колонку `label_id` (int) на основе label2id."""
     train_df = train_df.copy()
     test_df = test_df.copy()
 
@@ -75,6 +94,11 @@ def compute_class_weights_tensor(
     train_label_ids: np.ndarray,
     num_labels: int,
 ) -> torch.Tensor:
+    """Считает балансировочные веса классов (sklearn `balanced`).
+
+    Передаются в CrossEntropyLoss как `weight=...` — это компенсирует дисбаланс
+    в обучающей выборке без необходимости физического oversampling.
+    """
     class_weights = compute_class_weight(
         class_weight="balanced",
         classes=np.arange(num_labels),
@@ -88,6 +112,12 @@ def build_tokenizer(model_cfg: ModelConfig):
 
 
 def build_tokenize_document_fn(tokenizer, model_cfg: ModelConfig, data_cfg: DataConfig):
+    """Возвращает функцию-токенизатор, готовую к использованию в Dataset.map().
+
+    Документ режется на перекрывающиеся окна (sliding window с overlap = stride).
+    Число окон ограничивается max_chunks; недостающие позиции добиваются паддингом.
+    """
+
     def tokenize_document(example):
         encoded = tokenizer(
             example[data_cfg.text_col],
@@ -102,6 +132,8 @@ def build_tokenize_document_fn(tokenizer, model_cfg: ModelConfig, data_cfg: Data
         attention_mask_chunks = encoded["attention_mask"][:model_cfg.max_chunks]
         n_chunks = len(input_ids_chunks)
 
+        # Добиваем паддингом до фиксированного числа чанков, чтобы все семплы
+        # в батче имели одинаковую форму (упрощает data collator).
         if n_chunks < model_cfg.max_chunks:
             pad_len = model_cfg.max_chunks - n_chunks
             pad_ids = [tokenizer.pad_token_id] * model_cfg.max_length
@@ -126,6 +158,7 @@ def build_dataset_dict(
     model_cfg: ModelConfig,
     data_cfg: DataConfig,
 ) -> DatasetDict:
+    """Превращает DataFrame'ы в HuggingFace DatasetDict с уже токенизированными чанками."""
     dataset = DatasetDict(
         {
             "train": Dataset.from_pandas(

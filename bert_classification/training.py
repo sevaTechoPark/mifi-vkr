@@ -1,8 +1,20 @@
+"""Цикл обучения и сохранения результатов.
+
+Особенности пайплайна:
+  - HF Trainer не пишет чекпоинтов сам (save_strategy="no");
+  - лучший state_dict копируется в RAM коллбеком BestMetricInMemoryCallback —
+    после train() веса откатываются к лучшей эпохе для финального evaluate;
+  - resume-чекпоинт (веса + оптимизатор + scheduler) пишется отдельным
+    коллбеком в один и тот же файл resume_checkpoint.pt после каждой эпохи —
+    это позволяет дообучить с последней эпохи, не плодя файлы;
+  - класс-веса рассчитываются по train и попадают в CrossEntropyLoss модели.
+"""
+
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
-import os
 
 import torch
 from transformers import (
@@ -31,16 +43,18 @@ from .utils import (
     cleanup_memory,
 )
 
-# =============================================================================
-# Утилиты
-# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Вспомогательные утилиты
+# ---------------------------------------------------------------------------
 
 def _is_a100_or_better() -> bool:
+    """True, если CUDA-устройство поддерживает bf16 нативно (Ampere и новее)."""
     if not torch.cuda.is_available():
         return False
     try:
         major, _ = torch.cuda.get_device_capability(0)
-        return major >= 8  # Ampere (A100, RTX30) и новее → bf16 OK
+        return major >= 8
     except Exception:
         return False
 
@@ -53,6 +67,11 @@ def load_recovery_checkpoint(
     map_location: str = "cpu",
     strict: bool = True,
 ) -> Tuple[Dict[str, Any], int]:
+    """Загружает resume-чекпоинт (веса + оптимизатор + scheduler).
+
+    Возвращает (полный payload чекпоинта, номер эпохи для продолжения обучения).
+    Если оптимизатор/scheduler не переданы — их состояние просто игнорируется.
+    """
     ckpt = torch.load(checkpoint_path, map_location=map_location)
     model.load_state_dict(ckpt["model_state_dict"], strict=strict)
     if optimizer is not None and ckpt.get("optimizer_state_dict") is not None:
@@ -67,14 +86,16 @@ def load_recovery_checkpoint(
     return ckpt, start_epoch
 
 
-# =============================================================================
-# Callbacks
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Коллбеки
+# ---------------------------------------------------------------------------
 
 class BestMetricInMemoryCallback(TrainerCallback):
-    """
-    Хранит лучший state_dict В ПАМЯТИ (на CPU) — на диск НЕ пишет.
-    После trainer.train() веса можно явно откатить на best epoch для финального evaluate.
+    """Держит лучший state_dict в RAM (на CPU), без записи на диск.
+
+    Используется, чтобы отвязать выбор лучшей модели от файлового чекпоинтинга
+    и избежать дублирования весов на диске. После trainer.train() веса
+    откатываются на лучшую эпоху явным вызовом load_state_dict_into_model.
     """
 
     def __init__(self, metric_name: str, greater_is_better: bool):
@@ -91,6 +112,7 @@ class BestMetricInMemoryCallback(TrainerCallback):
         self.trainer_ref = trainer
 
     def _extract_latest_eval_metrics(self, state) -> Optional[Dict[str, Any]]:
+        """Достаёт последнюю запись с метриками из истории логов Trainer'а."""
         if not state.log_history:
             return None
         for item in reversed(state.log_history):
@@ -108,7 +130,9 @@ class BestMetricInMemoryCallback(TrainerCallback):
         return current_metric < self.best_metric
 
     def on_evaluate(self, args, state, control, **kwargs):
-        # ВАЖНО: on_evaluate (не on_epoch_end) — к этому моменту метрики уже в log_history
+        # Срабатывает после on_epoch_end: к этому моменту метрики эпохи уже
+        # лежат в state.log_history. Если использовать on_epoch_end — метрик
+        # там ещё нет, и сравнение становится невозможным.
         if self.trainer_ref is None:
             return control
         metrics = self._extract_latest_eval_metrics(state)
@@ -126,6 +150,7 @@ class BestMetricInMemoryCallback(TrainerCallback):
         self.best_metric = current_metric
         self.best_epoch = epoch_num
         self.best_metrics = dict(metrics)
+        # Копируем веса на CPU, чтобы не держать дубль на GPU.
         self.best_state_dict = {
             k: v.detach().cpu().clone()
             for k, v in get_filtered_model_state_dict(self.trainer_ref.model).items()
@@ -134,14 +159,16 @@ class BestMetricInMemoryCallback(TrainerCallback):
 
 
 class RollingResumeCheckpointCallback(TrainerCallback):
-    """
-    Перезаписывает единственный resume_checkpoint.pt после каждой эпохи.
+    """Перезаписывает один и тот же resume_checkpoint.pt после каждой эпохи.
 
-    ВАЖНО: пишем in-place в существующий файл (без atomic rename), чтобы Google Drive
-    не воспринимал rename как delete+create и не отправлял предыдущую версию в корзину
-    (что забивает место). Trade-off: при крэше во время записи получим повреждённый
-    чекпоинт. Для нас это приемлемо — чекпоинт пересоздаётся каждую эпоху, и при
-    рестарте мы потеряем максимум одну эпоху обучения.
+    Запись делается in-place в существующий файл (truncate + write поверх того
+    же inode), а не через atomic rename. Это специально: Google Drive
+    интерпретирует rename как delete+create и отправляет предыдущую версию
+    в корзину, что быстро забивает место. При in-place записи такой проблемы нет.
+
+    Trade-off: если процесс упадёт во время записи, чекпоинт окажется
+    повреждённым — но он переписывается каждую эпоху, так что в худшем случае
+    мы потеряем одну эпоху обучения.
     """
 
     def __init__(self, output_dir: str):
@@ -171,26 +198,29 @@ class RollingResumeCheckpointCallback(TrainerCallback):
         target = Path(self.output_dir) / "resume_checkpoint.pt"
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # In-place перезапись:
-        # 1) Открываем файл в "wb" — это truncate + write поверх существующего inode.
-        # 2) torch.save принимает file-like объект.
-        # 3) fsync() на всякий случай форсит сброс на диск.
         with open(target, "wb") as f:
             torch.save(payload, f)
             try:
                 f.flush()
                 os.fsync(f.fileno())
             except OSError:
-                # На некоторых FS (включая некоторые Drive-маунты) fsync может бросить —
-                # это не критично, данные уже записаны через flush.
+                # На некоторых FS (включая часть Drive-маунтов) fsync не работает —
+                # это не критично, данные уже отправлены на запись через flush().
                 pass
         return control
 
-# =============================================================================
-# WeightedChunkTrainer — раздельный LR для энкодера и головы
-# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Trainer с раздельным LR для энкодера и головы
+# ---------------------------------------------------------------------------
 
 class WeightedChunkTrainer(Trainer):
+    """Trainer с двумя независимыми learning rate'ами: для энкодера и для головы.
+
+    Голова обычно обучается стабильнее на более высоком LR, а энкодер требует
+    более бережного дообучения. Раздельные LR задаются через attach_trainer_hparams.
+    """
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         outputs = model(**inputs)
         loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
@@ -198,6 +228,7 @@ class WeightedChunkTrainer(Trainer):
 
     def create_optimizer(self):
         if self.optimizer is None:
+            # Разбираем параметры по 4 группам: (encoder|head) x (decay|no_decay).
             decay_parameters = self.get_decay_parameter_names(self.model)
             encoder_params_decay = []
             encoder_params_no_decay = []
@@ -233,20 +264,23 @@ class WeightedChunkTrainer(Trainer):
 
 
 def attach_trainer_hparams(trainer: WeightedChunkTrainer, train_cfg: TrainConfig) -> WeightedChunkTrainer:
+    """Прокидывает гиперпараметры в Trainer как атрибуты, чтобы их видела create_optimizer."""
     trainer.lr_encoder = train_cfg.lr_encoder
     trainer.lr_head = train_cfg.lr_head
     trainer.custom_weight_decay = train_cfg.weight_decay
     return trainer
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TrainingArguments
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def build_training_arguments(path_cfg: PathConfig, train_cfg: TrainConfig) -> TrainingArguments:
+    """Собирает TrainingArguments с автодетектом bf16/fp16 и поддержкой warmup_ratio."""
     use_bf16 = train_cfg.bf16 and _is_a100_or_better()
     use_fp16 = (not use_bf16) and train_cfg.fp16_fallback_on_non_a100 and torch.cuda.is_available()
 
+    # Если задано абсолютное число warmup_steps — используем его, иначе долю.
     warmup_kwargs = {}
     if train_cfg.warmup_steps and train_cfg.warmup_steps > 0:
         warmup_kwargs["warmup_steps"] = train_cfg.warmup_steps
@@ -255,7 +289,8 @@ def build_training_arguments(path_cfg: PathConfig, train_cfg: TrainConfig) -> Tr
 
     return TrainingArguments(
         output_dir=path_cfg.output_dir,
-        save_strategy="no",  # Trainer ничего не пишет; всё через resume-callback
+        # Trainer ничего не сохраняет сам — сохранение делает RollingResumeCheckpointCallback.
+        save_strategy="no",
         eval_strategy="epoch",
         logging_strategy="epoch",
         report_to="none",
@@ -263,6 +298,8 @@ def build_training_arguments(path_cfg: PathConfig, train_cfg: TrainConfig) -> Tr
         per_device_eval_batch_size=train_cfg.batch_size,
         gradient_accumulation_steps=train_cfg.grad_accum_steps,
         num_train_epochs=train_cfg.num_epochs,
+        # learning_rate здесь — формальный (реально LR задаются в WeightedChunkTrainer),
+        # но HF Trainer требует это поле для построения lr_scheduler'а.
         learning_rate=train_cfg.lr_encoder,
         lr_scheduler_type="cosine",
         weight_decay=train_cfg.weight_decay,
@@ -273,7 +310,7 @@ def build_training_arguments(path_cfg: PathConfig, train_cfg: TrainConfig) -> Tr
         seed=train_cfg.seed,
         dataloader_num_workers=train_cfg.dataloader_num_workers,
         dataloader_pin_memory=True,
-        # load_best_model_at_end=False — используем in-memory tracker
+        # Лучшую модель восстанавливаем сами из BestMetricInMemoryCallback.
         load_best_model_at_end=False,
         metric_for_best_model=train_cfg.metric_for_best_model,
         greater_is_better=True,
@@ -284,9 +321,9 @@ def build_training_arguments(path_cfg: PathConfig, train_cfg: TrainConfig) -> Tr
     )
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Сборка Trainer
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def build_trainer(
     model_cfg: ModelConfig,
@@ -298,7 +335,12 @@ def build_trainer(
     id2label: Dict[int, str],
     class_weights_tensor: Optional[torch.Tensor],
 ):
+    """Собирает Trainer вместе с коллбеками; возвращает (trainer, best_callback)."""
+
     def model_init():
+        # model_init используется HF Trainer для воссоздания модели при пересиде
+        # обучения (например, при hyperparameter search). Здесь же мы используем
+        # его как обычный конструктор — он будет вызван один раз.
         model = build_model(
             model_cfg=model_cfg,
             num_labels=len(label2id),
@@ -346,9 +388,9 @@ def build_trainer(
     return trainer, best_callback
 
 
-# =============================================================================
-# Подготовка всего пайплайна
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Подготовка всего пайплайна и его запуск
+# ---------------------------------------------------------------------------
 
 def prepare_training_components(
     model_cfg: ModelConfig,
@@ -356,6 +398,11 @@ def prepare_training_components(
     data_cfg: DataConfig,
     path_cfg: PathConfig,
 ):
+    """Готовит все объекты для обучения и возвращает словарь компонентов.
+
+    Удобно вызывать отдельно, если нужно посмотреть на промежуточные результаты
+    (label2id, токенизированный датасет, веса классов) без запуска train().
+    """
     set_global_seed(train_cfg.seed)
     cleanup_memory()
 
@@ -413,6 +460,7 @@ def run_training_pipeline(
     data_cfg: DataConfig,
     path_cfg: PathConfig,
 ):
+    """Полный цикл: подготовка → train → откат на лучшую эпоху → finальный evaluate → сохранение метрик."""
     ensure_dir(path_cfg.output_dir)
 
     components = prepare_training_components(
@@ -426,9 +474,9 @@ def run_training_pipeline(
 
     trainer.train()
 
-    # Восстанавливаем лучший state_dict В ПАМЯТЬ перед финальным evaluate.
+    # Восстанавливаем лучший state_dict в память перед финальным evaluate.
     # strict=False обязательно: в модели есть buffer `class_weights`,
-    # а в сохранённом state_dict его нет (отфильтрован сознательно).
+    # а в сохранённом state_dict его нет (он отфильтрован сознательно).
     if best_callback.best_state_dict is not None:
         load_state_dict_into_model(trainer.model, best_callback.best_state_dict)
 
@@ -439,7 +487,8 @@ def run_training_pipeline(
     print(f"f1_macro:          {eval_metrics['eval_f1_macro']:.6f}")
     print(f"best_epoch:        {best_callback.best_epoch}")
 
-    # Пишем ТОЛЬКО метрики (никаких весов и истории на диск)
+    # На диск пишем только метрики и конфиги — никаких весов и истории.
+    # Веса доступны через resume_checkpoint.pt (его пишет отдельный коллбек).
     metrics_payload = {
         "best_epoch": best_callback.best_epoch,
         "best_metrics": best_callback.best_metrics,
@@ -447,11 +496,9 @@ def run_training_pipeline(
             k: float(v) if isinstance(v, (int, float)) else v
             for k, v in eval_metrics.items()
         },
-        "model_config": asdict(components["trainer"].args.__class__) if False else None,  # placeholder
+        "model_config": asdict(model_cfg),
+        "train_config": asdict(train_cfg),
     }
-    # сериализуем конфиги
-    metrics_payload["model_config"] = asdict(model_cfg)
-    metrics_payload["train_config"] = asdict(train_cfg)
 
     metrics_path = Path(path_cfg.output_dir) / "metrics.json"
     with open(metrics_path, "w", encoding="utf-8") as f:

@@ -66,7 +66,6 @@ mkdir -p ~/papadyk-vkr/bert-embeddings-out-train-augmented
 ```
 python -m bert_embeddings.main \
   --train-file ~/papadyk-vkr/data/train.csv \
-  --test-file ~/papadyk-vkr/data/test.csv \
   --output-dir ~/papadyk-vkr/bert-embeddings-out-train
 ```
 
@@ -74,7 +73,6 @@ python -m bert_embeddings.main \
 ```
 python -m bert_embeddings.main \
   --train-file ~/papadyk-vkr/data/train_augmented.csv \
-  --test-file ~/papadyk-vkr/data/test.csv \
   --output-dir ~/papadyk-vkr/bert-embeddings-out-train-augmented
 ```
 

@@ -1,6 +1,21 @@
-import os
-import json
+"""
+Построение гибридного признакового пространства (TF-IDF + BERT).
+
+Из обучающего и тестового CSV формируются:
+
+  * TF-IDF (word n-grams + char_wb n-grams), L2-нормированный;
+  * BERT-эмбеддинги документов (через LongTextRobertaEmbedder при
+    наличии model_dir, либо через базовую модель ruRoberta при mean-pool);
+  * Гибридный вектор как hstack TF-IDF и взвешенного BERT-блока.
+
+На диск сохраняются две версии гибридного вектора и отдельно BERT-блок,
+а также артефакты векторизаторов и StandardScaler.
+"""
+
 import argparse
+import json
+import os
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -17,6 +32,7 @@ from .config import HybridModelConfig, HybridDataConfig
 
 
 def load_and_clean_df(path, text_col="text", label_col="label", require_labels=True):
+    """Прочитать CSV, удалить пустые тексты и (опционально) пустые метки."""
     df = pd.read_csv(path)
 
     required_cols = [text_col]
@@ -39,6 +55,12 @@ def load_and_clean_df(path, text_col="text", label_col="label", require_labels=T
 
 
 def build_tfidf(X_train, X_test, model_cfg: HybridModelConfig):
+    """
+    Построить TF-IDF из двух подвекторизаторов: word n-grams и char_wb n-grams.
+
+    Возвращает L2-нормированные разреженные матрицы для train/test и оба
+    обученных векторизатора.
+    """
     word_tfidf = TfidfVectorizer(
         analyzer="word",
         ngram_range=(model_cfg.word_ngram_min, model_cfg.word_ngram_max),
@@ -73,6 +95,7 @@ def build_tfidf(X_train, X_test, model_cfg: HybridModelConfig):
 
 
 def build_embedder(model_dir="", model_cfg=None):
+    """Сконструировать LongTextRobertaEmbedder по параметрам конфига."""
     if model_cfg is None:
         model_cfg = HybridModelConfig()
     return LongTextRobertaEmbedder(
@@ -88,13 +111,22 @@ def build_embedder(model_dir="", model_cfg=None):
 
 
 def document_bert_embeddings_from_model_dir(texts, model_dir, model_cfg=None):
+    """Эмбеддинги документов через дообученную модель из model_dir."""
     embedder = build_embedder(model_dir=model_dir, model_cfg=model_cfg)
     embs = embedder.encode([str(t) for t in texts])
     return embs.astype(np.float32)
 
 
 @torch.no_grad()
-def document_bert_embeddings_base(texts, tokenizer, model, device, batch_size=8, max_length=512):
+def document_bert_embeddings_base(
+    texts, tokenizer, model, device, batch_size=8, max_length=512,
+):
+    """
+    Эмбеддинги документов через базовую ruRoberta-модель.
+
+    Используется mean-pooling по токенам с учётом attention_mask с
+    последующей L2-нормировкой.
+    """
     all_vecs = []
     texts = [str(t) for t in texts]
     model.eval()
@@ -133,6 +165,20 @@ def run_build(
     model_cfg=None,
     data_cfg=None,
 ):
+    """
+    Сформировать и сохранить гибридное признаковое пространство.
+
+    Сохраняемые артефакты:
+
+      * X_train_bert.npy / X_test_bert.npy — L2-нормированные эмбеддинги;
+      * X_train_hybrid.npz / X_test_hybrid.npz — гибридный вектор с
+        финальной L2-нормировкой (используется MLP);
+      * X_train_hybrid_noL2.npz / X_test_hybrid_noL2.npz — гибридный
+        вектор без финальной L2 (используется classical-моделями);
+      * X_train_dense.npy / X_test_dense.npy — опциональное dense-представление
+        после TruncatedSVD;
+      * texts_*.csv, y_*.csv, *.joblib, meta.json — служебные файлы.
+    """
     if model_cfg is None:
         model_cfg = HybridModelConfig()
     if data_cfg is None:
@@ -140,30 +186,37 @@ def run_build(
 
     os.makedirs(outdir, exist_ok=True)
 
-    train_df = load_and_clean_df(train_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col)
-    test_df = load_and_clean_df(test_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col)
+    train_df = load_and_clean_df(
+        train_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col,
+    )
+    test_df = load_and_clean_df(
+        test_file, text_col=data_cfg.text_col, label_col=data_cfg.label_col,
+    )
 
     X_train = train_df[data_cfg.text_col]
     y_train = train_df[data_cfg.label_col]
     X_test = test_df[data_cfg.text_col]
     y_test = test_df[data_cfg.label_col]
 
-    # Сохраняем сами тексты, чтобы classical-модуль мог поднять TF-IDF-only baseline
+    # Тексты сохраняются отдельно: они нужны TF-IDF-only baseline в
+    # модуле classical-моделей.
     train_df[[data_cfg.text_col, data_cfg.label_col]].to_csv(
-        os.path.join(outdir, "texts_train.csv"), index=False
+        os.path.join(outdir, "texts_train.csv"), index=False,
     )
     test_df[[data_cfg.text_col, data_cfg.label_col]].to_csv(
-        os.path.join(outdir, "texts_test.csv"), index=False
+        os.path.join(outdir, "texts_test.csv"), index=False,
     )
 
-    X_train_tfidf, X_test_tfidf, word_tfidf, char_tfidf = build_tfidf(X_train, X_test, model_cfg)
+    X_train_tfidf, X_test_tfidf, word_tfidf, char_tfidf = build_tfidf(
+        X_train, X_test, model_cfg,
+    )
 
     if model_dir:
         X_train_bert = document_bert_embeddings_from_model_dir(
-            X_train.tolist(), model_dir=model_dir, model_cfg=model_cfg
+            X_train.tolist(), model_dir=model_dir, model_cfg=model_cfg,
         )
         X_test_bert = document_bert_embeddings_from_model_dir(
-            X_test.tolist(), model_dir=model_dir, model_cfg=model_cfg
+            X_test.tolist(), model_dir=model_dir, model_cfg=model_cfg,
         )
     else:
         torch_device = torch.device(
@@ -181,10 +234,10 @@ def run_build(
             batch_size=model_cfg.batch_size, max_length=model_cfg.max_length,
         )
 
-    # StandardScaler по BERT-блоку — нужен только для baseline ruRoberta (raw mean-pool).
-    # Для custom embedder выключаем — он уже L2-нормирован triplet/MNR-обучением.
+    # StandardScaler по BERT-блоку нужен для базовых mean-pool эмбеддингов.
+    # Для дообученного эмбеддера (уже L2-нормирован) стандартизация отключается.
     if getattr(model_cfg, "disable_bert_scaler", False):
-        print("[hybrid.build] BERT StandardScaler: DISABLED (custom embedder)")
+        print("[hybrid.build] BERT StandardScaler: DISABLED")
         X_train_bert_scaled = X_train_bert.astype(np.float32)
         X_test_bert_scaled = X_test_bert.astype(np.float32)
         scaler_bert = None
@@ -194,48 +247,63 @@ def run_build(
         X_train_bert_scaled = scaler_bert.fit_transform(X_train_bert).astype(np.float32)
         X_test_bert_scaled = scaler_bert.transform(X_test_bert).astype(np.float32)
 
-    # ВАЖНО: L2-нормируем BERT-блок ОТДЕЛЬНО, до конкатенации с TF-IDF.
-    # Это убирает зависимость эффективного веса BERT от длины TF-IDF-вектора.
+    # L2-нормировка BERT-блока до конкатенации с TF-IDF. Это делает
+    # эффективный вклад BERT в гибридный вектор независимым от размерности
+    # TF-IDF-части.
     X_train_bert_l2 = normalize(X_train_bert_scaled, norm="l2", axis=1).astype(np.float32)
     X_test_bert_l2 = normalize(X_test_bert_scaled, norm="l2", axis=1).astype(np.float32)
 
-    # Сохраняем bert-only представление для classical (это даёт лучший single-model
-    # результат на коротком train).
+    # Отдельно сохраняем BERT-блок: classical-модели на нём дают сильный
+    # single-source baseline.
     np.save(os.path.join(outdir, "X_train_bert.npy"), X_train_bert_l2)
     np.save(os.path.join(outdir, "X_test_bert.npy"), X_test_bert_l2)
 
-    # Гибридный вектор: TF-IDF (уже L2) + BERT (L2) * bert_weight, БЕЗ финального normalize.
-    # Финальная L2 на hstack ломает per-block структуру → классике это вредит.
+    # Гибридный вектор: TF-IDF (уже L2) + BERT (L2) * bert_weight.
     X_train_bert_weighted = X_train_bert_l2 * float(model_cfg.bert_weight)
     X_test_bert_weighted = X_test_bert_l2 * float(model_cfg.bert_weight)
 
-    X_train_hybrid = sp.hstack([X_train_tfidf, sp.csr_matrix(X_train_bert_weighted)]).tocsr()
-    X_test_hybrid = sp.hstack([X_test_tfidf, sp.csr_matrix(X_test_bert_weighted)]).tocsr()
+    X_train_hybrid = sp.hstack(
+        [X_train_tfidf, sp.csr_matrix(X_train_bert_weighted)],
+    ).tocsr()
+    X_test_hybrid = sp.hstack(
+        [X_test_tfidf, sp.csr_matrix(X_test_bert_weighted)],
+    ).tocsr()
 
-    # Дополнительно — версия с финальным normalize, для совместимости с MLP-веткой,
-    # которая ожидала L2-нормированный hybrid (не ломаем интерфейс).
+    # Версия с финальной L2-нормировкой — для MLP, где норма входа
+    # участвует в обучении.
     X_train_hybrid_l2 = normalize(X_train_hybrid, norm="l2")
     X_test_hybrid_l2 = normalize(X_test_hybrid, norm="l2")
 
-    # Опциональный TruncatedSVD для плотного представления (как было)
+    # Опциональный TruncatedSVD для плотного представления.
     svd = None
     if model_cfg.svd_components and model_cfg.svd_components > 0:
-        n_comp = min(model_cfg.svd_components, X_train_hybrid_l2.shape[1] - 1, X_train_hybrid_l2.shape[0] - 1)
+        n_comp = min(
+            model_cfg.svd_components,
+            X_train_hybrid_l2.shape[1] - 1,
+            X_train_hybrid_l2.shape[0] - 1,
+        )
         svd = TruncatedSVD(n_components=n_comp, random_state=42)
         X_train_dense = svd.fit_transform(X_train_hybrid_l2)
         X_test_dense = svd.transform(X_test_hybrid_l2)
-        np.save(os.path.join(outdir, "X_train_dense.npy"), X_train_dense.astype(np.float32))
-        np.save(os.path.join(outdir, "X_test_dense.npy"), X_test_dense.astype(np.float32))
+        np.save(
+            os.path.join(outdir, "X_train_dense.npy"),
+            X_train_dense.astype(np.float32),
+        )
+        np.save(
+            os.path.join(outdir, "X_test_dense.npy"),
+            X_test_dense.astype(np.float32),
+        )
         joblib.dump(svd, os.path.join(outdir, "svd.joblib"))
 
-    # === ВАЖНО для backward-compat с MLP ===
-    # X_train_hybrid.npz должен оставаться L2-нормированным после hstack — MLP
-    # был натренирован/настроен под него. Иначе ‖x‖ скачет с 1 до ~5 и MLP плывёт.
-    # Новая «classical-friendly» версия без финальной L2 — отдельный файл.
-    sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid_l2)      # ← back to L2 (для MLP)
-    sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid_l2)        # ← back to L2 (для MLP)
-    sp.save_npz(os.path.join(outdir, "X_train_hybrid_noL2.npz"), X_train_hybrid)    # ← для classical
-    sp.save_npz(os.path.join(outdir, "X_test_hybrid_noL2.npz"), X_test_hybrid)      # ← для classical
+    # Гибридный вектор сохраняется в двух вариантах:
+    #   X_train_hybrid.npz       — с финальной L2 (для MLP);
+    #   X_train_hybrid_noL2.npz  — с поблочной L2, но без финальной (для
+    #                              линейных моделей: им вреднa финальная L2).
+    sp.save_npz(os.path.join(outdir, "X_train_hybrid.npz"), X_train_hybrid_l2)
+    sp.save_npz(os.path.join(outdir, "X_test_hybrid.npz"), X_test_hybrid_l2)
+    sp.save_npz(os.path.join(outdir, "X_train_hybrid_noL2.npz"), X_train_hybrid)
+    sp.save_npz(os.path.join(outdir, "X_test_hybrid_noL2.npz"), X_test_hybrid)
+
     pd.Series(y_train).to_csv(os.path.join(outdir, "y_train.csv"), index=False)
     pd.Series(y_test).to_csv(os.path.join(outdir, "y_test.csv"), index=False)
 
@@ -243,6 +311,7 @@ def run_build(
     joblib.dump(char_tfidf, os.path.join(outdir, "char_tfidf.joblib"))
     joblib.dump(scaler_bert, os.path.join(outdir, "scaler_bert.joblib"))
 
+    # Доля энергии BERT-блока в гибридном векторе (для диагностики).
     if X_train_tfidf.shape[0] > 0:
         tfidf_sq = np.asarray(X_train_tfidf.multiply(X_train_tfidf).sum(axis=1)).ravel()
         bert_sq = np.linalg.norm(X_train_bert_weighted, axis=1) ** 2
@@ -264,8 +333,12 @@ def run_build(
         "bert_batch_size": model_cfg.batch_size,
         "bert_weight": float(model_cfg.bert_weight),
         "bert_scaler_used": scaler_bert is not None,
-        "bert_weight_with_model_dir": float(getattr(model_cfg, "bert_weight_with_model_dir", 5.0)),
-        "bert_weight_base_model": float(getattr(model_cfg, "bert_weight_base_model", 1.0)),
+        "bert_weight_with_model_dir": float(
+            getattr(model_cfg, "bert_weight_with_model_dir", 5.0)
+        ),
+        "bert_weight_base_model": float(
+            getattr(model_cfg, "bert_weight_base_model", 1.0)
+        ),
         "svd_components": int(model_cfg.svd_components),
         "train_shape": list(X_train_hybrid.shape),
         "test_shape": list(X_test_hybrid.shape),
@@ -273,8 +346,8 @@ def run_build(
         "bert_dim": int(X_train_bert_scaled.shape[1]),
         "bert_share_mean": bert_share_mean,
         "bert_l2_per_block": True,
-        "hybrid_final_l2": True,              # X_train_hybrid.npz — с L2 (для MLP)
-        "hybrid_noL2_file": "X_train_hybrid_noL2.npz",  # без финальной L2 (для classical)
+        "hybrid_final_l2": True,
+        "hybrid_noL2_file": "X_train_hybrid_noL2.npz",
         "bert_only_file": "X_train_bert.npy",
     }
     with open(os.path.join(outdir, "meta.json"), "w", encoding="utf-8") as f:

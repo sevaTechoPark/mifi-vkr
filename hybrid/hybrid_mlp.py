@@ -1,34 +1,20 @@
 """
-hybrid/hybrid_mlp.py — v20.1
+MLP-классификатор поверх гибридных или плотных BERT-эмбеддингов.
 
-Возврат к проверенной v3-архитектуре (StrongMLP + ResidualBlock + Mixup в feature space
-+ FocalLoss + balanced class_weight + CosineAnnealingLR без warmup), на которой
-исторически были метрики:
-  [custom_embeder] noisy  → balanced_accuracy=0.5115, macro_f1=0.5039
-  [custom_embeder] clean  → balanced_accuracy=0.4207, macro_f1=0.4563
-  [default]        noisy  → balanced_accuracy=0.2778, macro_f1=0.2688
-  [default]        clean  → balanced_accuracy=0.2813, macro_f1=0.3287
+Архитектура — StrongMLP: входная проекция, N остаточных блоков
+(LayerNorm → Linear → GELU → Linear → Dropout), классификационная голова.
+Обучение: AdamW + CosineAnnealingLR, FocalLoss с балансировкой классов и
+label smoothing, mixup в пространстве признаков.
 
-Что выкинуто относительно v18 (после диагностики — это давало коллапс в majority-class):
-  - SimpleHeadMLP (270K parameters) — слабая ёмкость для 36 классов, в проде валится в 1-5 классов
-  - warmup (5 эпох) перед cosine с пиком 3e-4 — на 22 батчах epoch_length=22 «прыгает» loss с 8→3→2
-  - retry-логика (3 попытки с lr×0.333 и lr×0.1) — лечила симптом, не причину
-  - smoothed class_weights (cw**0.5) — искажает balanced
-  - sqrt(dim) feature rescale для bert_only — не нужно при правильном scheduler
-
-Что сохранено из v15+ (полезные обёртки, не влияющие на качество):
-  - feature_source ("hybrid" | "bert_only") — выбор источника фич
-  - Имя файла: mlp-results-<basename(vecdir)>-<YYYY-MM-DDTHH-MM>.json
-  - Pretty-имя модели в логе: "MLP-StrongMLP[<features>] profile=<name>"
-  - --features CLI-аргумент
-  - В JSON сохраняется per_class_f1 на лучшей эпохе
-
-Дефолтный feature_source = "hybrid" (как в v3, где и получались 0.5039).
+Источники признаков:
+  * ``hybrid``     — гибридный TF-IDF + BERT вектор (sparse → dense либо
+                     dense через TruncatedSVD).
+  * ``bert_only``  — плотные L2-нормированные BERT-эмбеддинги.
 """
 
-import os
-import json
 import argparse
+import json
+import os
 import warnings
 from datetime import datetime
 
@@ -38,25 +24,24 @@ import scipy.sparse as sp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from torch.utils.data import Dataset, DataLoader
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
+from torch.utils.data import DataLoader, Dataset
 
 from .config import (
-    HybridMLPConfig,
-    hybrid_mlp_config_from_profile,
-    HYBRID_MLP_PROFILES,
-    HYBRID_MLP_FEATURE_SOURCES,
     DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
+    HYBRID_MLP_FEATURE_SOURCES,
+    HYBRID_MLP_PROFILES,
+    HybridMLPConfig,
     default_mlp_profile_for_features,
+    hybrid_mlp_config_from_profile,
 )
 
 
-# ----------------------------------------------------------------------------- 
-# Seeding
+# -----------------------------------------------------------------------------
+# Воспроизводимость
 # -----------------------------------------------------------------------------
 def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
@@ -71,7 +56,7 @@ def _set_seed(seed: int) -> None:
 
 
 # -----------------------------------------------------------------------------
-# Dataset
+# Датасет в памяти (numpy → tensor по требованию)
 # -----------------------------------------------------------------------------
 class DenseDataset(Dataset):
     def __init__(self, X, y):
@@ -86,9 +71,11 @@ class DenseDataset(Dataset):
 
 
 # -----------------------------------------------------------------------------
-# Архитектура — v3 StrongMLP (input_proj → N×ResidualBlock → head)
+# Архитектура StrongMLP
 # -----------------------------------------------------------------------------
 class ResidualBlock(nn.Module):
+    """LayerNorm → FC×2 → GELU → Dropout с остаточным соединением."""
+
     def __init__(self, dim: int, dropout: float):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
@@ -112,6 +99,8 @@ class ResidualBlock(nn.Module):
 
 
 class StrongMLP(nn.Module):
+    """Входная проекция + N остаточных блоков + классификационная голова."""
+
     def __init__(self, input_dim, num_classes, hidden_dim, num_blocks, dropout):
         super().__init__()
         self.input_proj = nn.Sequential(
@@ -142,9 +131,11 @@ class StrongMLP(nn.Module):
 
 
 # -----------------------------------------------------------------------------
-# FocalLoss + Mixup в feature-space (как в v3)
+# Лосс и mixup
 # -----------------------------------------------------------------------------
 class FocalLoss(nn.Module):
+    """Focal cross-entropy с весами классов и label smoothing."""
+
     def __init__(self, alpha=None, gamma=1.0, label_smoothing=0.05):
         super().__init__()
         self.alpha = alpha
@@ -164,7 +155,12 @@ class FocalLoss(nn.Module):
 
 
 def _mixup_features(features, targets, alpha, num_classes):
-    """Mixup на скрытом представлении (после input_proj). Возвращает (mixed_features, soft_targets)."""
+    """
+    Mixup в пространстве скрытого представления.
+
+    Если ``alpha <= 0``, mixup не выполняется и возвращается one-hot
+    кодирование исходных меток.
+    """
     if alpha <= 0.0:
         return features, F.one_hot(targets, num_classes=num_classes).float()
 
@@ -179,7 +175,7 @@ def _mixup_features(features, targets, alpha, num_classes):
 
 
 def _soft_cross_entropy(logits, soft_targets, class_weight=None):
-    """CE для soft-targets (после mixup). class_weight применяется per-class к log-prob."""
+    """Cross-entropy для soft-меток (после mixup), с весами классов."""
     log_probs = F.log_softmax(logits, dim=-1)
     if class_weight is not None:
         log_probs = log_probs * class_weight.unsqueeze(0)
@@ -187,7 +183,7 @@ def _soft_cross_entropy(logits, soft_targets, class_weight=None):
 
 
 # -----------------------------------------------------------------------------
-# Evaluation
+# Оценка на тесте
 # -----------------------------------------------------------------------------
 def _evaluate(model, loader, device, labels_all=None, return_per_class=False):
     model.eval()
@@ -216,8 +212,11 @@ def _evaluate(model, loader, device, labels_all=None, return_per_class=False):
                 average=None, zero_division=0,
                 labels=labels_all,
             )
+
     metrics = {
-        "balanced_accuracy": round(float(balanced_accuracy_score(all_true, all_preds)), 6),
+        "balanced_accuracy": round(
+            float(balanced_accuracy_score(all_true, all_preds)), 6,
+        ),
         "macro_f1": round(float(f1), 6),
     }
     if return_per_class:
@@ -226,7 +225,7 @@ def _evaluate(model, loader, device, labels_all=None, return_per_class=False):
 
 
 # -----------------------------------------------------------------------------
-# Device
+# Определение устройства
 # -----------------------------------------------------------------------------
 def _resolve_device(device):
     if device is None:
@@ -246,13 +245,16 @@ def _resolve_device(device):
 
 
 # -----------------------------------------------------------------------------
-# Загрузка фич (hybrid TF-IDF+BERT либо только BERT)
+# Загрузка признаков из директории, подготовленной hybrid build.
 # -----------------------------------------------------------------------------
 def _load_features(vecdir: str, feature_source: str):
     """
+    Загрузить признаки нужного типа.
+
     feature_source:
-      - "hybrid"    → X_train_dense.npy (если есть, после SVD) или X_train_hybrid.npz (TF-IDF+BERT)
-      - "bert_only" → X_train_bert.npy / X_test_bert.npy (только BERT-эмбеддинги, 1024-dim)
+      * ``hybrid``    — предпочтительно X_*_dense.npy (после SVD),
+                        иначе X_*_hybrid.npz (sparse → dense);
+      * ``bert_only`` — X_*_bert.npy (плотные L2-нормированные эмбеддинги).
     """
     if feature_source == "bert_only":
         ftr = os.path.join(vecdir, "X_train_bert.npy")
@@ -261,7 +263,8 @@ def _load_features(vecdir: str, feature_source: str):
             raise FileNotFoundError(
                 f"feature_source='bert_only' требует файлов:\n"
                 f"  {ftr}\n  {fte}\n"
-                f"Их не нашёл. Используй feature_source='hybrid' или сгенерируй bert-only фичи."
+                f"Их не нашёл. Используй feature_source='hybrid' либо "
+                f"перегенерируй bert-only признаки."
             )
         X_train = np.load(ftr).astype(np.float32)
         X_test = np.load(fte).astype(np.float32)
@@ -274,7 +277,10 @@ def _load_features(vecdir: str, feature_source: str):
         if os.path.exists(dense_train) and os.path.exists(dense_test):
             X_train = np.load(dense_train).astype(np.float32)
             X_test = np.load(dense_test).astype(np.float32)
-            print(f"[hybrid_mlp] using DENSE (SVD) hybrid features: dim={X_train.shape[1]}")
+            print(
+                f"[hybrid_mlp] using DENSE (SVD) hybrid features: "
+                f"dim={X_train.shape[1]}"
+            )
             return X_train, X_test
         sparse_train = os.path.join(vecdir, "X_train_hybrid.npz")
         sparse_test = os.path.join(vecdir, "X_test_hybrid.npz")
@@ -286,7 +292,10 @@ def _load_features(vecdir: str, feature_source: str):
             )
         X_train = sp.load_npz(sparse_train).astype(np.float32).toarray()
         X_test = sp.load_npz(sparse_test).astype(np.float32).toarray()
-        print(f"[hybrid_mlp] using SPARSE→DENSE hybrid features: dim={X_train.shape[1]}")
+        print(
+            f"[hybrid_mlp] using SPARSE→DENSE hybrid features: "
+            f"dim={X_train.shape[1]}"
+        )
         return X_train, X_test
 
     raise ValueError(
@@ -296,7 +305,7 @@ def _load_features(vecdir: str, feature_source: str):
 
 
 # -----------------------------------------------------------------------------
-# Главная функция: один запуск (v3-логика, без retry)
+# Главная функция: один прогон обучения
 # -----------------------------------------------------------------------------
 def run_mlp(
     vecdir,
@@ -304,22 +313,13 @@ def run_mlp(
     epochs: int | None = None,
     device=None,
     feature_source: str = DEFAULT_HYBRID_MLP_FEATURE_SOURCE,
-    simple_head: bool | None = None,  # принимается ради обратной совместимости, игнорируется
 ):
     """
-    Один прогон MLP по v3-схеме.
+    Обучить StrongMLP по выбранному источнику признаков.
 
-    feature_source:
-      - "hybrid"    (дефолт) — TF-IDF+BERT, hidden_dim≈1024 для custom, ~78к для baseline
-      - "bert_only" — только BERT-эмбеддинги (1024-dim)
-
-    simple_head игнорируется (был в v18, выкинут как нерабочий).
+    Возвращает словарь с метриками лучшей эпохи, конфигурацией и историей
+    обучения; результат также записывается в JSON в каталоге ``vecdir``.
     """
-    if simple_head is not None:
-        # тихое предупреждение, чтобы не ломать старые вызовы
-        print(f"[hybrid_mlp] note: simple_head={simple_head} в v19 игнорируется "
-              f"(возвращена единая архитектура StrongMLP).")
-
     if cfg is None:
         cfg = HybridMLPConfig()
     if feature_source not in HYBRID_MLP_FEATURE_SOURCES:
@@ -331,7 +331,7 @@ def run_mlp(
     n_epochs = int(epochs) if epochs is not None else int(cfg.epochs)
     _set_seed(cfg.seed)
 
-    # --- 1. данные
+    # 1. Признаки
     X_train, X_test = _load_features(vecdir, feature_source)
 
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
@@ -343,7 +343,7 @@ def run_mlp(
     num_classes = len(le.classes_)
     labels_all = list(range(num_classes))
 
-    # --- 2. class weights (balanced, как в v3 — БЕЗ smoothing)
+    # 2. Веса классов (balanced без сглаживания).
     if cfg.use_class_weight:
         cw = compute_class_weight(
             class_weight="balanced",
@@ -354,7 +354,7 @@ def run_mlp(
     else:
         class_weights_t = None
 
-    # --- 3. loaders
+    # 3. DataLoader'ы
     train_ds = DenseDataset(X_train, y_train_enc)
     test_ds = DenseDataset(X_test, y_test_enc)
 
@@ -370,7 +370,7 @@ def run_mlp(
         num_workers=0, pin_memory=pin,
     )
 
-    # --- 4. модель / loss / optimizer / scheduler (всё как v3)
+    # 4. Модель, лосс, оптимизатор, шедулер
     model = StrongMLP(
         input_dim=X_train.shape[1],
         num_classes=num_classes,
@@ -381,12 +381,17 @@ def run_mlp(
 
     n_params = sum(p.numel() for p in model.parameters())
     pretty = f"MLP-StrongMLP[{feature_source}]"
-    print(f"[hybrid_mlp] {pretty} | input_dim={X_train.shape[1]} num_classes={num_classes} "
-          f"params={n_params:,}")
-    print(f"[hybrid_mlp] hidden_dim={cfg.hidden_dim} blocks={cfg.num_blocks} dropout={cfg.dropout} "
-          f"lr={cfg.learning_rate} wd={cfg.weight_decay} bs={cfg.batch_size} "
-          f"focal_gamma={cfg.focal_gamma} ls={cfg.label_smoothing} mixup={cfg.mixup_alpha} "
-          f"class_weight={cfg.use_class_weight}")
+    print(
+        f"[hybrid_mlp] {pretty} | input_dim={X_train.shape[1]} "
+        f"num_classes={num_classes} params={n_params:,}"
+    )
+    print(
+        f"[hybrid_mlp] hidden_dim={cfg.hidden_dim} blocks={cfg.num_blocks} "
+        f"dropout={cfg.dropout} lr={cfg.learning_rate} wd={cfg.weight_decay} "
+        f"bs={cfg.batch_size} focal_gamma={cfg.focal_gamma} "
+        f"ls={cfg.label_smoothing} mixup={cfg.mixup_alpha} "
+        f"class_weight={cfg.use_class_weight}"
+    )
 
     cw_device = class_weights_t.to(device) if class_weights_t is not None else None
     criterion = FocalLoss(
@@ -399,12 +404,11 @@ def run_mlp(
         lr=cfg.learning_rate,
         weight_decay=cfg.weight_decay,
     )
-    # ВАЖНО: cosine annealing без warmup — как в v3
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=n_epochs, eta_min=cfg.min_lr,
     )
 
-    # --- 5. обучение
+    # 5. Цикл обучения
     best_f1 = -1.0
     best_metrics = None
     best_per_class = None
@@ -425,10 +429,14 @@ def run_mlp(
             if cfg.mixup_alpha > 0.0:
                 features = model.forward_features(xb)
                 mixed_features, soft_targets = _mixup_features(
-                    features, yb, alpha=cfg.mixup_alpha, num_classes=num_classes,
+                    features, yb,
+                    alpha=cfg.mixup_alpha,
+                    num_classes=num_classes,
                 )
                 logits = model.head(mixed_features)
-                loss = _soft_cross_entropy(logits, soft_targets, class_weight=cw_device)
+                loss = _soft_cross_entropy(
+                    logits, soft_targets, class_weight=cw_device,
+                )
             else:
                 logits = model(xb)
                 loss = criterion(logits, yb)
@@ -440,13 +448,16 @@ def run_mlp(
 
         scheduler.step()
 
-        # на лучшей эпохе попросим ещё per-class f1
         metrics, per_class = _evaluate(
-            model, test_loader, device, labels_all=labels_all, return_per_class=True,
+            model, test_loader, device,
+            labels_all=labels_all, return_per_class=True,
         )
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
         current_lr = optimizer.param_groups[0]["lr"]
-        print(f"epoch={epoch + 1:>3} lr={current_lr:.2e} train_loss={mean_loss:.6f} metrics={metrics}")
+        print(
+            f"epoch={epoch + 1:>3} lr={current_lr:.2e} "
+            f"train_loss={mean_loss:.6f} metrics={metrics}"
+        )
 
         history.append({
             "epoch": epoch + 1,
@@ -498,7 +509,6 @@ def run_mlp(
         "input_dim": int(X_train.shape[1]),
         "seed": cfg.seed,
         "n_params": int(n_params),
-        "v20_1_notes": "v19 + только patience 8→12 (bs=128 оставлен, v20 с bs=64 показал f1=0.02 — откат)",
         "per_class_f1_on_best": per_class_f1_dict,
         "history": history,
         "config_full": {
@@ -556,27 +566,15 @@ def build_argparser():
         default=None,
     )
     parser.add_argument("--max-grad-norm", type=float, default=None)
-    # warmup-epochs принимаем для обратной совместимости, но игнорируем
-    parser.add_argument(
-        "--warmup-epochs", type=int, default=None,
-        help="DEPRECATED в v19 — игнорируется (CosineAnnealing без warmup как в v3).",
-    )
     parser.add_argument(
         "--profile", type=str, default=None,
         choices=sorted(HYBRID_MLP_PROFILES.keys()),
-        help='Профиль гиперпараметров. По умолчанию выбирается от --features.',
+        help="Профиль гиперпараметров. По умолчанию выбирается от --features.",
     )
     parser.add_argument(
         "--features", type=str, default=None,
         choices=list(HYBRID_MLP_FEATURE_SOURCES),
-        help=f'Источник фич. По умолчанию: "{DEFAULT_HYBRID_MLP_FEATURE_SOURCE}".',
-    )
-    # принимаем ради совместимости вызова из main.py, в v19 игнорируется
-    parser.add_argument(
-        "--simple-head",
-        type=lambda v: str(v).lower() in {"true", "1", "yes"},
-        default=None,
-        help="DEPRECATED в v19 — игнорируется (SimpleHeadMLP убран).",
+        help=f'Источник признаков. По умолчанию: "{DEFAULT_HYBRID_MLP_FEATURE_SOURCE}".',
     )
     return parser
 
@@ -584,14 +582,19 @@ def build_argparser():
 def _cfg_from_args(args):
     from dataclasses import replace
 
-    feature_source = getattr(args, "features", None) or DEFAULT_HYBRID_MLP_FEATURE_SOURCE
+    feature_source = (
+        getattr(args, "features", None) or DEFAULT_HYBRID_MLP_FEATURE_SOURCE
+    )
 
     if getattr(args, "profile", None):
         profile_name = args.profile
         print(f"[hybrid_mlp] using profile: {profile_name!r} (explicit)")
     else:
         profile_name = default_mlp_profile_for_features(feature_source)
-        print(f"[hybrid_mlp] using profile: {profile_name!r} (auto for features={feature_source!r})")
+        print(
+            f"[hybrid_mlp] using profile: {profile_name!r} "
+            f"(auto for features={feature_source!r})"
+        )
 
     cfg = hybrid_mlp_config_from_profile(profile_name)
 
@@ -620,7 +623,6 @@ def main():
         epochs=args.epochs,
         device=args.device,
         feature_source=feature_source,
-        simple_head=getattr(args, "simple_head", None),
     )
 
 

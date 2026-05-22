@@ -1,27 +1,37 @@
-import os
-import json
+"""
+Линейные классические модели поверх гибридных признаков.
+
+Модуль перебирает три семейства линейных классификаторов
+(LinearSVC, LogisticRegression, RidgeClassifier) с полным перебором по
+сетке параметра регуляризации ``C`` и с дополнительными модификациями
+(L1-регуляризация, калибровка вероятностей через CalibratedClassifierCV).
+
+Для каждого источника признаков (bert_only, hybrid, tfidf_only)
+прогоняется единая воронка моделей; результаты собираются в JSON.
+"""
+
 import argparse
+import json
+import os
 import warnings
 from datetime import datetime
-from typing import Tuple, Dict, Any
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.exceptions import UndefinedMetricWarning, ConvergenceWarning
+from sklearn.exceptions import ConvergenceWarning, UndefinedMetricWarning
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.metrics import balanced_accuracy_score, f1_score
+from sklearn.preprocessing import normalize
 from sklearn.svm import LinearSVC
 
 
 # -----------------------------------------------------------------------------
-# v17: оставляем только три линейных семейства — LinearSVC, LogisticRegression,
-# RidgeClassifier. SGD/RBF/NB/Voting/Stacking удалены. Полный перебор C-grid и
-# модификации (L1/L2, калибровка) сохранены.
-# Источники остаются snake_case.
+# Имена моделей в логах и в результирующем JSON.
 # -----------------------------------------------------------------------------
 PRETTY_NAMES = {
     "linear_svc": "LinearSVC",
@@ -35,16 +45,17 @@ PRETTY_NAMES = {
 
 
 def _pretty(model_key: str) -> str:
-    """linear_svc → LinearSVC; linear_svc_l1 → LinearSVC-L1; etc."""
+    """Привести машинный ключ модели к человекочитаемому имени."""
     return PRETTY_NAMES.get(model_key, model_key)
 
 
-def _fmt_model(model_key: str, tag: str = "", C: float | None = None, extra: str = "") -> str:
-    """
-    Финальное имя модели:
-      'LinearSVC[bert_only] C=3.0'
-      'LogisticRegression-L1[hybrid] C=1.0'
-    """
+def _fmt_model(
+    model_key: str,
+    tag: str = "",
+    C: float | None = None,
+    extra: str = "",
+) -> str:
+    """Собрать строку вида ``'LinearSVC[hybrid] C=1.0'``."""
     pretty = _pretty(model_key)
     name = f"{pretty}[{tag}]" if tag else pretty
     parts = [name]
@@ -56,7 +67,7 @@ def _fmt_model(model_key: str, tag: str = "", C: float | None = None, extra: str
 
 
 # -----------------------------------------------------------------------------
-# Eval helpers
+# Вычисление метрик и безопасный fit/eval с обработкой исключений.
 # -----------------------------------------------------------------------------
 def _eval(y_true, y_pred):
     with warnings.catch_warnings():
@@ -64,12 +75,18 @@ def _eval(y_true, y_pred):
         warnings.simplefilter("ignore", category=UserWarning)
         warnings.simplefilter("ignore", category=ConvergenceWarning)
         return {
-            "balanced_accuracy": round(float(balanced_accuracy_score(y_true, y_pred)), 6),
-            "macro_f1": round(float(f1_score(y_true, y_pred, average="macro", zero_division=0)), 6),
+            "balanced_accuracy": round(
+                float(balanced_accuracy_score(y_true, y_pred)), 6,
+            ),
+            "macro_f1": round(
+                float(f1_score(y_true, y_pred, average="macro", zero_division=0)), 6,
+            ),
         }
 
 
-def _safe_fit_eval(model_key, model, Xtr, ytr, Xte, yte, results, tag="", C=None, extra=""):
+def _safe_fit_eval(model_key, model, Xtr, ytr, Xte, yte, results,
+                   tag="", C=None, extra=""):
+    """Обучить и оценить модель; записать результат либо ошибку."""
     full_name = _fmt_model(model_key, tag=tag, C=C, extra=extra)
     try:
         with warnings.catch_warnings():
@@ -95,14 +112,15 @@ def _safe_fit_eval(model_key, model, Xtr, ytr, Xte, yte, results, tag="", C=None
             "model_key": model_key,
             "feature_source": tag,
             "C": C,
-            "balanced_accuracy": None, "macro_f1": None,
+            "balanced_accuracy": None,
+            "macro_f1": None,
             "error": f"{type(e).__name__}: {e}",
         })
         return None, None
 
 
 # -----------------------------------------------------------------------------
-# C-grid for linear models
+# Перебор C-сетки для линейных моделей.
 # -----------------------------------------------------------------------------
 def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     best = (None, None, None)
@@ -115,7 +133,10 @@ def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
         m, metrics = _safe_fit_eval(
             "linear_svc", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
-        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+        if metrics and (
+            best[2] is None
+            or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]
+        ):
             best = (C, m, metrics)
     if best[0] is not None:
         print(f"  ★ best LinearSVC[{tag}]: C={best[0]} → {best[2]}")
@@ -130,7 +151,7 @@ def _grid_linear_svc(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 
 
 def _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
-    """LinearSVC с penalty=l1 (sparse weights, другая регуляризация)."""
+    """LinearSVC с L1-регуляризацией (разреженные веса)."""
     best = (None, None, None)
     for C in c_grid:
         kwargs = {
@@ -143,7 +164,10 @@ def _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
         m, metrics = _safe_fit_eval(
             "linear_svc_l1", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
-        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+        if metrics and (
+            best[2] is None
+            or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]
+        ):
             best = (C, m, metrics)
     if best[0] is not None:
         print(f"  ★ best LinearSVC-L1[{tag}]: C={best[0]} → {best[2]}")
@@ -163,7 +187,10 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
         m, metrics = _safe_fit_eval(
             "logreg", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
-        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+        if metrics and (
+            best[2] is None
+            or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]
+        ):
             best = (C, m, metrics)
     if best[0] is not None:
         print(f"  ★ best LogisticRegression[{tag}]: C={best[0]} → {best[2]}")
@@ -179,8 +206,11 @@ def _grid_logreg(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 
 def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
     """
-    v14: penalty='elasticnet' + l1_ratio=1.0 — новый API sklearn 1.8+,
-    эквивалентно penalty='l1', но без FutureWarning.
+    LogisticRegression с L1-регуляризацией.
+
+    Используется параметризация ``penalty='elasticnet'`` + ``l1_ratio=1.0``
+    с solver=saga: эквивалентно чистой L1, но согласовано с актуальным API
+    sklearn.
     """
     best = (None, None, None)
     for C in c_grid:
@@ -194,7 +224,10 @@ def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
         m, metrics = _safe_fit_eval(
             "logreg_l1", model, Xtr, ytr, Xte, yte, results, tag=tag, C=C,
         )
-        if metrics and (best[2] is None or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]):
+        if metrics and (
+            best[2] is None
+            or metrics["balanced_accuracy"] > best[2]["balanced_accuracy"]
+        ):
             best = (C, m, metrics)
     if best[0] is not None:
         print(f"  ★ best LogisticRegression-L1[{tag}]: C={best[0]} → {best[2]}")
@@ -202,7 +235,7 @@ def _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight):
 
 
 # -----------------------------------------------------------------------------
-# Per-source pipeline
+# Воронка моделей на одном источнике признаков.
 # -----------------------------------------------------------------------------
 def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
                    include_l1=True):
@@ -213,38 +246,49 @@ def _run_on_source(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight,
 
     if include_l1:
         _grid_linear_svc_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
+        # logreg_l1 имеет смысл прогонять на плотных матрицах: solver=saga
+        # на огромных разреженных входах сходится крайне медленно.
         if not sp.issparse(Xtr):
             _grid_logreg_l1(Xtr, ytr, Xte, yte, results, tag, c_grid, class_weight)
 
-    # Calibrated SVC (sigmoid + isotonic) на лучшем C
+    # Калибровка вероятностей для лучшего LinearSVC по C.
+    # Требует минимум двух примеров в каждом классе для CV.
     if best_svc[0] is not None:
         class_counts = pd.Series(ytr).value_counts()
         min_class_count = int(class_counts.min())
         if min_class_count >= 2:
             safe_cv = max(2, min(3, min_class_count))
-            cal_kwargs = {"random_state": 42, "max_iter": 10000, "dual": False, "C": best_svc[0]}
+            cal_kwargs = {
+                "random_state": 42, "max_iter": 10000, "dual": False,
+                "C": best_svc[0],
+            }
             if class_weight is not None:
                 cal_kwargs["class_weight"] = class_weight
             for method in ("sigmoid", "isotonic"):
                 model_key = f"linear_svc_calibrated_{method}"
                 _safe_fit_eval(
                     model_key,
-                    CalibratedClassifierCV(LinearSVC(**cal_kwargs), method=method, cv=safe_cv),
+                    CalibratedClassifierCV(
+                        LinearSVC(**cal_kwargs), method=method, cv=safe_cv,
+                    ),
                     Xtr, ytr, Xte, yte, results, tag=tag, C=best_svc[0],
                 )
 
-    # RidgeClassifier
+    # RidgeClassifier — отдельная линейная модель с L2-регуляризацией без
+    # перебора C (для краткости берётся sklearn-дефолт).
     base = {"random_state": 42}
     if class_weight is not None:
         base["class_weight"] = class_weight
-    _safe_fit_eval("ridge_classifier", RidgeClassifier(**base),
-                   Xtr, ytr, Xte, yte, results, tag=tag)
+    _safe_fit_eval(
+        "ridge_classifier", RidgeClassifier(**base),
+        Xtr, ytr, Xte, yte, results, tag=tag,
+    )
 
     return best_svc, best_lr
 
 
 # -----------------------------------------------------------------------------
-# Main entrypoint
+# Точка входа.
 # -----------------------------------------------------------------------------
 def run_classical(
     vecdir: str,
@@ -254,18 +298,20 @@ def run_classical(
     c_grid: Tuple[float, ...] = (0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0),
 ):
     """
-    Полный classical-прогон. Cosine-методы убраны — для них есть отдельный модуль.
+    Прогнать набор линейных моделей по нескольким источникам признаков.
 
-    v14+: class_weight по умолчанию 'balanced' — на min_class=1 это критично для macro_f1.
-    v16: красивые имена моделей в логах и JSON; имя файла включает basename(vecdir) + datetime.
-    v17: оставлены только три линейных семейства (LinearSVC, LogisticRegression,
-         RidgeClassifier) со всеми модификациями (L1/L2, калибровка) и полным
-         перебором C-grid. SGD/RBF/NB/Voting/Stacking удалены.
+    Параметры:
+      vecdir          — каталог с артефактами hybrid build.
+      class_weight    — балансировка классов; по умолчанию 'balanced'
+                        (важно при сильном дисбалансе с min_class=1).
+      feature_sources — какие источники признаков использовать:
+          * 'bert_only'  — X_*_bert.npy (плотный L2-нормированный, 1024-d);
+          * 'hybrid'     — X_*_hybrid_noL2.npz (поблочная L2, без финальной);
+          * 'tfidf_only' — TF-IDF строится на лету из texts_*.csv.
+      c_grid          — сетка C для перебора у LinearSVC и LogisticRegression.
 
-    feature_sources:
-      - 'bert_only'   → X_*_bert.npy (L2-нормированный, dense, dim=1024)
-      - 'hybrid'      → X_*_hybrid_noL2.npz (per-block L2, без финальной L2)
-      - 'tfidf_only'  → строит TF-IDF на лету из texts_*.csv
+    Результаты сохраняются в JSON ``classical-results-<basename>-<timestamp>.json``
+    в каталоге vecdir.
     """
     y_train = pd.read_csv(os.path.join(vecdir, "y_train.csv")).iloc[:, 0].astype(str)
     y_test = pd.read_csv(os.path.join(vecdir, "y_test.csv")).iloc[:, 0].astype(str)
@@ -277,18 +323,22 @@ def run_classical(
     results: list = []
     bests: Dict[str, Any] = {}
 
-    print(f"y_train: {len(y_train)} объектов, {num_classes} классов, "
-          f"мин. класс = {min_class_count} пример(а/ов)")
-    print(f"feature_sources: {feature_sources} | c_grid: {c_grid} | class_weight={class_weight!r}")
+    print(
+        f"y_train: {len(y_train)} объектов, {num_classes} классов, "
+        f"мин. класс = {min_class_count} пример(а/ов)"
+    )
+    print(
+        f"feature_sources: {feature_sources} | c_grid: {c_grid} | "
+        f"class_weight={class_weight!r}"
+    )
 
-    # === bert_only ===
+    # --- bert_only -----------------------------------------------------------
     if "bert_only" in feature_sources:
         bert_tr_path = os.path.join(vecdir, "X_train_bert.npy")
         bert_te_path = os.path.join(vecdir, "X_test_bert.npy")
         if os.path.exists(bert_tr_path) and os.path.exists(bert_te_path):
             X_bert_tr = np.load(bert_tr_path).astype(np.float32)
             X_bert_te = np.load(bert_te_path).astype(np.float32)
-            from sklearn.preprocessing import normalize
             X_bert_tr = normalize(X_bert_tr, norm="l2", axis=1)
             X_bert_te = normalize(X_bert_te, norm="l2", axis=1)
             best_svc, best_lr = _run_on_source(
@@ -298,10 +348,12 @@ def run_classical(
             )
             bests["bert_only"] = {"svc": best_svc, "lr": best_lr}
         else:
-            print(f"\n[!] bert_only SKIPPED: нет {bert_tr_path}. "
-                  f"Перезапусти `hybrid build`.")
+            print(
+                f"\n[!] bert_only SKIPPED: нет {bert_tr_path}. "
+                f"Перезапусти `hybrid build`."
+            )
 
-    # === hybrid ===
+    # --- hybrid --------------------------------------------------------------
     if "hybrid" in feature_sources:
         noL2_tr = os.path.join(vecdir, "X_train_hybrid_noL2.npz")
         noL2_te = os.path.join(vecdir, "X_test_hybrid_noL2.npz")
@@ -320,12 +372,12 @@ def run_classical(
         )
         bests["hybrid"] = {"svc": best_svc, "lr": best_lr}
 
-    # === tfidf_only ===
+    # --- tfidf_only ----------------------------------------------------------
     if "tfidf_only" in feature_sources and include_tfidf_only:
         train_texts_path = os.path.join(vecdir, "texts_train.csv")
         test_texts_path = os.path.join(vecdir, "texts_test.csv")
         if os.path.exists(train_texts_path) and os.path.exists(test_texts_path):
-            print(f"\n=== Source: tfidf_only ===")
+            print("\n=== Source: tfidf_only ===")
             train_df = pd.read_csv(train_texts_path)
             test_df = pd.read_csv(test_texts_path)
             text_col = train_df.columns[0]
@@ -347,12 +399,14 @@ def run_classical(
                 include_l1=True,
             )
 
-    # === Сводка ===
+    # --- Сводка --------------------------------------------------------------
     valid = [r for r in results if r.get("balanced_accuracy") is not None]
     valid.sort(key=lambda r: r["balanced_accuracy"], reverse=True)
-    print(f"\n=== TOP-10 по balanced_accuracy ===")
+    print("\n=== TOP-10 по balanced_accuracy ===")
     for r in valid[:10]:
-        print(f"  {r['balanced_accuracy']:.4f} / f1={r['macro_f1']:.4f}  {r['model']}")
+        print(
+            f"  {r['balanced_accuracy']:.4f} / f1={r['macro_f1']:.4f}  {r['model']}"
+        )
 
     summary = {
         "class_weight": class_weight,
@@ -366,7 +420,6 @@ def run_classical(
         "results": results,
     }
 
-    # v16: имя файла = classical-results-<basename(vecdir)>-<YYYY-MM-DDTHH:MM>.json
     vec_base = os.path.basename(os.path.normpath(vecdir)) or "vecdir"
     stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
     out_name = f"classical-results-{vec_base}-{stamp}.json"
@@ -380,18 +433,26 @@ def run_classical(
 def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vecdir", required=True)
-    parser.add_argument("--class-weight", default="balanced",
-                        choices=["balanced", "none"], nargs="?")
+    parser.add_argument(
+        "--class-weight", default="balanced",
+        choices=["balanced", "none"], nargs="?",
+    )
     parser.add_argument("--no-tfidf-only", action="store_true")
-    parser.add_argument("--feature-sources", default="bert_only,hybrid,tfidf_only")
-    parser.add_argument("--c-grid", default="0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0")
+    parser.add_argument(
+        "--feature-sources", default="bert_only,hybrid,tfidf_only",
+    )
+    parser.add_argument(
+        "--c-grid", default="0.05,0.1,0.3,0.5,1.0,2.0,3.0,5.0",
+    )
     return parser
 
 
 def main():
     parser = build_argparser()
     args = parser.parse_args()
-    sources = tuple(s.strip() for s in args.feature_sources.split(",") if s.strip())
+    sources = tuple(
+        s.strip() for s in args.feature_sources.split(",") if s.strip()
+    )
     c_grid = tuple(float(c) for c in args.c_grid.split(",") if c.strip())
     cw = None if (args.class_weight in (None, "none")) else args.class_weight
     run_classical(

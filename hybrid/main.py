@@ -199,8 +199,6 @@ def main():
             include_tfidf_only=(not args.no_tfidf_only) and ("tfidf_only" in sources),
             feature_sources=sources,
             c_grid=c_grid,
-            enable_stacking=not args.no_stacking,
-            enable_rbf=not args.no_rbf,
         )
     elif args.command == "mlp":
         device = _detect_device(args.device)

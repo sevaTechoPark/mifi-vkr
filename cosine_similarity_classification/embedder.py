@@ -1,3 +1,5 @@
+"""Загрузка размеченных CSV и построение эмбеддингов через LongTextRobertaEmbedder."""
+
 import numpy as np
 import pandas as pd
 
@@ -23,6 +25,11 @@ def load_texts_and_labels(
     label_col=LABEL_COLUMN,
     require_labels=True,
 ):
+    """Читает CSV и приводит text/label к строкам, чистит пустые значения.
+
+    require_labels=False допускает CSV без колонки label — нужно для test-выборок
+    в режиме предсказания без замеров метрик.
+    """
     df = pd.read_csv(path)
 
     required_cols = [text_col]
@@ -55,6 +62,7 @@ def build_embedder(
     batch_size=BATCH_SIZE,
     device=DEVICE,
 ):
+    """Конструирует LongTextRobertaEmbedder с переданными гиперпараметрами."""
     return LongTextRobertaEmbedder(
         model_dir=model_dir,
         base_model_name=base_model_name,
@@ -69,6 +77,7 @@ def build_embedder(
 
 
 def embed_dataframe(df, embedder, text_col=TEXT_COLUMN):
+    """Возвращает матрицу эмбеддингов (N, hidden_size) для колонки text."""
     texts = df[text_col].tolist()
     embs = embedder.encode(texts)
     return embs

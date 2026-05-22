@@ -1,14 +1,23 @@
+"""Алгоритмы классификации по косинусной близости.
+
+Три семейства методов:
+- centroid: робастный центроид класса (hard-trim / soft-trim + iterative refinement);
+- nearest: top-k soft-vote по соседям с температурой;
+- centroid_nn: взвешенный ансамбль centroid + nearest.
+"""
+
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 
 def normalize_rows(x: np.ndarray) -> np.ndarray:
+    """L2-нормирует каждую строку матрицы (с epsilon-защитой от нулей)."""
     norms = np.linalg.norm(x, axis=1, keepdims=True) + 1e-12
     return x / norms
 
 
 # =============================================================================
-# Centroid: weighted/iterative
+# Centroid: weighted / iterative
 # =============================================================================
 
 def _centroid_one_class_soft(
@@ -18,8 +27,7 @@ def _centroid_one_class_soft(
     refine_iters: int,
     mode: str,
 ) -> np.ndarray:
-    """
-    Робастный центроид одного класса.
+    """Робастный центроид одного класса.
 
     mode="hard":
         1) обычный mean → L2;
@@ -29,11 +37,12 @@ def _centroid_one_class_soft(
     mode="soft":
         1) обычный mean → L2;
         2) cos-sim каждой точки к центроиду; вес = max(sim, 0) ** trim_power;
-        3) опционально занулить вес у нижних trim_ratio долей (для устойчивости к выбросам);
+        3) опционально зануляем веса у нижних trim_ratio долей
+           (устойчивость к мислейблам и выбросам);
         4) weighted mean → L2.
 
-    refine_iters: сколько раз повторить шаги 2-3-4 после первого пересчёта.
-        0 — один проход (как hard);
+    refine_iters задаёт количество дополнительных итераций пересчёта центроида:
+        0 — один проход;
         1 — ещё одна итерация поверх (обычно сходится за 1-2 шага).
     """
     n = class_embs.shape[0]
@@ -41,11 +50,10 @@ def _centroid_one_class_soft(
         c = class_embs.mean(axis=0)
         return c / (np.linalg.norm(c) + 1e-12)
 
-    # init
     centroid = class_embs.mean(axis=0)
     centroid = centroid / (np.linalg.norm(centroid) + 1e-12)
 
-    iters = max(1, 1 + int(refine_iters))   # минимум 1 проход = старое hard поведение
+    iters = max(1, 1 + int(refine_iters))
 
     for _ in range(iters):
         sims = class_embs @ centroid  # (n,)
@@ -57,7 +65,7 @@ def _centroid_one_class_soft(
         else:  # soft
             w = np.clip(sims, 0.0, None) ** float(trim_power)
             if trim_ratio > 0.0 and n >= 3:
-                # занулить нижние trim_ratio*n весов — устойчивость к мислейблам
+                # Зануляем веса нижних trim_ratio*n точек по cos-sim.
                 n_zero = int(np.floor(n * trim_ratio))
                 if n_zero > 0:
                     cutoff = np.partition(sims, n_zero)[n_zero - 1]
@@ -67,7 +75,7 @@ def _centroid_one_class_soft(
 
         new_centroid = new_centroid / (np.linalg.norm(new_centroid) + 1e-12)
 
-        # сходимость
+        # Ранний выход, если центроид перестал сдвигаться.
         if np.linalg.norm(new_centroid - centroid) < 1e-6:
             centroid = new_centroid
             break
@@ -84,11 +92,7 @@ def build_centroids(
     trim_power: float = 4.0,
     refine_iters: int = 0,
 ):
-    """
-    Возвращает (classes, centroids). Оба L2-нормированы.
-
-    Старая сигнатура (trim_ratio только) сохранена для обратной совместимости.
-    """
+    """Строит центроиды всех классов. Возвращает (classes, centroids), оба L2-нормированы."""
     train_embs = normalize_rows(train_embs)
     train_labels = np.asarray(train_labels)
 
@@ -117,10 +121,9 @@ def predict_centroid(
     trim_power: float = 4.0,
     refine_iters: int = 0,
 ):
-    """
-    Предсказание по cosine-similarity к центроидам классов.
+    """Предсказание класса по cos-sim к центроидам.
 
-    Старая сигнатура (trim_ratio только) работает как раньше (mode="hard", refine=0).
+    Возвращает (pred_labels, pred_scores, classes, centroids).
     """
     query_embs = normalize_rows(query_embs)
     classes, centroids = build_centroids(
@@ -142,17 +145,17 @@ def predict_centroid(
 # =============================================================================
 
 def _softvote_topk(sims: np.ndarray, train_labels: np.ndarray, k: int, temperature: float):
-    """
-    Голосование по top-k соседям с температурой.
-    Возвращает (pred_labels, votes_matrix, classes).
+    """Голосование top-k соседей с softmax-температурой.
+
+    Возвращает (pred_labels, pred_scores, votes_matrix, classes).
     """
     effective_k = min(int(k), sims.shape[1])
-    # топ-k по убыванию sim
+    # Топ-k индексов по убыванию cos-sim.
     topk_idx = np.argpartition(-sims, effective_k - 1, axis=1)[:, :effective_k]
     rows = np.arange(sims.shape[0])[:, None]
     topk_sims = sims[rows, topk_idx]
 
-    # softmax по top-k
+    # Softmax по top-k с температурой.
     w = topk_sims / float(temperature)
     w = w - w.max(axis=1, keepdims=True)
     w = np.exp(w)
@@ -166,8 +169,8 @@ def _softvote_topk(sims: np.ndarray, train_labels: np.ndarray, k: int, temperatu
 
     topk_labels = train_labels[topk_idx]  # (Q, k)
 
-    # Векторизованное накопление голосов: для каждой колонки top-k
-    # маппим labels → индексы классов и делаем np.add.at
+    # Векторизованное накопление голосов: маппим labels → индексы классов
+    # и аккумулируем веса через np.add.at по каждой колонке top-k.
     col_idx = np.vectorize(label_to_col.get)(topk_labels)  # (Q, k)
     for j in range(effective_k):
         np.add.at(votes, (np.arange(Q), col_idx[:, j]), w[:, j])
@@ -185,9 +188,7 @@ def predict_nearest(
     k: int = 5,
     temperature: float = 0.1,
 ):
-    """
-    Один прогон с заданными (k, T). Совместимо со старой сигнатурой.
-    """
+    """Одиночный прогон nearest с заданными (k, temperature)."""
     train_embs = normalize_rows(train_embs).astype(np.float32)
     query_embs = normalize_rows(query_embs).astype(np.float32)
     train_labels = np.asarray(train_labels)
@@ -207,10 +208,11 @@ def predict_nearest_sweep(
     k_list,
     t_list,
 ):
-    """
-    Sweep по (k, T). Возвращает список dict со всеми вариантами:
-      [{ "k": k, "temperature": T, "pred_labels": ..., "pred_scores": ..., "votes": ..., "classes": ... }]
-    Считает sims один раз — это самая дорогая операция.
+    """Sweep по (k, T) с переиспользованием матрицы sims.
+
+    Матрица cos-sim (самая дорогая операция) считается один раз,
+    после чего перебираются все комбинации k и temperature.
+    Возвращает список dict с предсказаниями и весами для каждой пары (k, T).
     """
     train_embs = normalize_rows(train_embs).astype(np.float32)
     query_embs = normalize_rows(query_embs).astype(np.float32)
@@ -254,18 +256,19 @@ def predict_centroid_nn_ensemble(
     # mix
     alpha: float = 0.5,
 ):
-    """
+    """Ансамбль centroid + nearest со смешиванием в нормированном виде.
+
     score(query, class) = alpha * cos(query, centroid_class)
                         + (1 - alpha) * nn_softvote_weight(query, class)
 
-    cos уже в [-1, 1], soft-vote weights в [0, 1]. Перед смешиванием приводим к [0,1]
-    через min-max по строкам query (per-query), чтобы шкалы были сопоставимы.
+    cos в [-1, 1], soft-vote weights в [0, 1]. Чтобы шкалы были сопоставимы,
+    обе матрицы приводятся к [0, 1] через per-query min-max перед смешиванием.
     """
     train_embs_n = normalize_rows(train_embs).astype(np.float32)
     query_embs_n = normalize_rows(query_embs).astype(np.float32)
     train_labels = np.asarray(train_labels)
 
-    # 1) centroid scores
+    # 1) Centroid scores.
     classes_c, centroids = build_centroids(
         train_embs_n, train_labels,
         trim_ratio=trim_ratio, trim_mode=trim_mode,
@@ -273,16 +276,16 @@ def predict_centroid_nn_ensemble(
     )
     centroid_scores = query_embs_n @ centroids.T  # (Q, |C|)
 
-    # 2) nn soft-vote scores
+    # 2) Nearest soft-vote scores.
     sims = query_embs_n @ train_embs_n.T
     _, _, nn_votes, classes_nn = _softvote_topk(
         sims, train_labels, k=k, temperature=temperature,
     )
 
-    # классы могут совпадать, но для надёжности — выравниваем
+    # Классы должны совпадать у обоих методов: они построены на одном train_labels.
     assert np.array_equal(classes_c, classes_nn), "Class sets must match between centroid and nn"
 
-    # 3) per-query min-max → [0,1]
+    # 3) Per-query min-max приведение к [0, 1] для совместимости шкал.
     def _rowwise_minmax(M):
         m = M.min(axis=1, keepdims=True)
         M2 = M - m

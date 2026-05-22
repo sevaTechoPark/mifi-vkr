@@ -1,3 +1,9 @@
+"""Точка входа cosine_similarity_classification.
+
+Прогоняет один из методов (centroid / nearest / centroid_nn) либо все сразу,
+проводит sweep по гиперпараметрам, печатает таблицы и сохраняет результаты в JSON.
+"""
+
 import argparse
 import json
 import os
@@ -8,6 +14,7 @@ logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR
 
 import pandas as pd
 import torch
+from sklearn.metrics import f1_score, balanced_accuracy_score
 
 from cosine_similarity_classification.config import (
     MODEL_DIR,
@@ -70,6 +77,7 @@ def _test_has_label_column(test_file, label_col):
 
 
 def _detect_device(device=None):
+    """Возвращает доступное устройство (cuda → mps → cpu), либо переданное явно."""
     if device is not None:
         device = str(device).strip().lower()
         if device:
@@ -82,6 +90,7 @@ def _detect_device(device=None):
 
 
 def _parse_list(s, cast):
+    """Парсит CSV-строку вида '1,3,5' в список значений нужного типа."""
     if not s or not str(s).strip():
         return []
     return [cast(x) for x in str(s).split(",") if str(x).strip()]
@@ -95,28 +104,24 @@ def _run_centroid_full_sweep(train_embs, train_labels, test_embs, test_df, label
                               trim_ratio, trim_mode, trim_power,
                               trim_power_sweep, trim_mode_sweep, trim_ratio_sweep,
                               refine_iters):
-    """
-    v18: полный sweep по (mode, ratio, power) для centroid. Выбираем лучший по f1.
-    Всего точек = len(modes) × len(ratios) × len(powers) [для soft]
-                + len(modes) × len(ratios) × 1 [для hard, power не влияет]
+    """Полный sweep по (mode × ratio × power) для centroid; выбирается лучший по macro_f1.
+
+    Для mode="hard" параметр power не влияет, поэтому он перебирается только при mode="soft",
+    что сокращает суммарное число точек в sweep.
     """
     power_list = _parse_list(trim_power_sweep, float) or [float(trim_power)]
     mode_list = _parse_list(trim_mode_sweep, str) or [str(trim_mode)]
     ratio_list = _parse_list(trim_ratio_sweep, float) or [float(trim_ratio)]
 
-    # hard режим не использует power → для него считаем только один раз
     sweep_results = []
     best = None
     best_f1 = -1.0
 
     if test_has_labels:
-        from sklearn.metrics import f1_score, balanced_accuracy_score
         y_true_tmp = test_df[label_col].astype(str).values
 
-    # Перебираем (mode, ratio, power)
     for mode in mode_list:
         for ratio in ratio_list:
-            # Для hard режима power не нужен — берём один (любой, например 1.0)
             powers_for_this_mode = [1.0] if mode == "hard" else power_list
             for tp in powers_for_this_mode:
                 pred_labels, pred_scores, classes, centroids = predict_centroid(
@@ -168,7 +173,7 @@ def _run_centroid_full_sweep(train_embs, train_labels, test_embs, test_df, label
 
     if test_has_labels:
         print(f"--- {_pretty_method('centroid')} sweep (mode × ratio × power) ---")
-        # Сортируем по f1 для удобства чтения
+        # Сортируем по убыванию f1 — удобно читать.
         sorted_sweep = sorted(
             sweep_results,
             key=lambda r: r.get("macro_f1", 0.0),
@@ -199,6 +204,7 @@ def _run_centroid_full_sweep(train_embs, train_labels, test_embs, test_df, label
 def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
                  test_has_labels, *,
                  knn_k, knn_temperature, knn_k_sweep, knn_t_sweep):
+    """Sweep по (k × T) для top-k soft-vote nearest; выбирается лучший по macro_f1."""
     k_list = _parse_list(knn_k_sweep, int) or [int(knn_k)]
     t_list = _parse_list(knn_t_sweep, float) or [float(knn_temperature)]
 
@@ -209,7 +215,6 @@ def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
 
     best = sweep[0]
     if test_has_labels:
-        from sklearn.metrics import f1_score
         y_true_tmp = test_df[label_col].astype(str).values
         best_f1 = -1.0
         for item in sweep:
@@ -230,7 +235,6 @@ def _run_nearest(train_embs, train_labels, test_embs, test_df, label_col,
     }
 
     if test_has_labels:
-        from sklearn.metrics import f1_score, balanced_accuracy_score
         y_true_tmp = test_df[label_col].astype(str).values
         print(f"--- {_pretty_method('nearest')} sweep (k × T) ---")
         for item in sweep:
@@ -255,6 +259,7 @@ def _run_centroid_nn_sweep(train_embs, train_labels, test_embs, test_df, label_c
                             trim_ratio, trim_mode, trim_power, refine_iters,
                             knn_k, knn_temperature,
                             ensemble_alpha, ensemble_alpha_sweep):
+    """Sweep по коэффициенту alpha для ансамбля centroid + nearest."""
     alpha_list = _parse_list(ensemble_alpha_sweep, float) or [float(ensemble_alpha)]
 
     sweep_results = []
@@ -262,7 +267,6 @@ def _run_centroid_nn_sweep(train_embs, train_labels, test_embs, test_df, label_c
     best_f1 = -1.0
 
     if test_has_labels:
-        from sklearn.metrics import f1_score, balanced_accuracy_score
         y_true_tmp = test_df[label_col].astype(str).values
 
     for a in alpha_list:
@@ -330,6 +334,7 @@ def _run_centroid_nn_sweep(train_embs, train_labels, test_embs, test_df, label_c
 
 
 def _eval_and_print(method_key, pred_labels, test_df, label_col, test_has_labels):
+    """Считает метрики и печатает строку результата для одного метода."""
     pretty = _pretty_method(method_key)
     if test_has_labels:
         y_true = test_df[label_col].astype(str).values
@@ -376,6 +381,11 @@ def run_from_params(
     ensemble_alpha_sweep: str = ENSEMBLE_ALPHA_SWEEP,
     results_out: str | None = None,
 ):
+    """Полный прогон: эмбеддинги → методы → метрики → сохранение JSON.
+
+    Если method="all" — прогоняются все три метода и выводится финальный топ
+    по macro_f1. Иначе выполняется только указанный метод.
+    """
     train_file = str(Path(train_file).expanduser())
     test_file = str(Path(test_file).expanduser())
 
@@ -562,7 +572,7 @@ def build_argparser():
     parser.add_argument("--method", type=str,
                         choices=METHOD_CHOICES,
                         default=METHOD,
-                        help='Default "all" — прогон всех методов.')
+                        help='По умолчанию "all" — прогон всех методов.')
 
     parser.add_argument("--max-length", type=int, default=MAX_LENGTH)
     parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
@@ -595,7 +605,7 @@ def build_argparser():
                         default=ENSEMBLE_ALPHA_SWEEP)
 
     parser.add_argument("--results-out", type=str, default=None,
-                        help="Куда сохранить JSON.")
+                        help="Куда сохранить итоговый JSON.")
     return parser
 
 

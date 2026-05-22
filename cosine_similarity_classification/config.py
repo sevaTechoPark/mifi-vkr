@@ -1,5 +1,8 @@
-"""
-Конфиг модуля cosine_similarity_classification.
+"""Параметры по умолчанию для cosine_similarity_classification.
+
+Эмбеддерные параметры (BASE_MODEL_NAME, MAX_LENGTH, CHUNK_SIZE …) берутся
+из bert_embeddings.config.EmbeddingConfig, чтобы train-time и inference-time
+конфигурация энкодера была согласована.
 """
 
 from bert_embeddings.config import EmbeddingConfig
@@ -34,20 +37,20 @@ KNN_K_SWEEP: str = "1,3,5,7,9,11,15,21,31"
 KNN_T_SWEEP: str = "0.03,0.05,0.1,0.15,0.2,0.3"
 
 # -----------------------------------------------------------------------------
-# Centroid: trim + soft-trim + refinement
+# Centroid: робастный центроид с trim + soft-trim + iterative refinement
 # -----------------------------------------------------------------------------
 CENTROID_TRIM_RATIO: float = 0.15
 CENTROID_TRIM_MODE: str = "soft"
 CENTROID_TRIM_POWER: float = 4.0
 CENTROID_REFINE_ITERS: int = 1
 
+# Sweep по гиперпараметрам центроида — перебираются все комбинации mode × ratio × power.
 CENTROID_TRIM_POWER_SWEEP: str = "2,4,6,8"
-# v18: добавлены sweep по trim_mode и trim_ratio (исторический максимум был на hard, 0.15)
 CENTROID_TRIM_MODE_SWEEP: str = "hard,soft"
 CENTROID_TRIM_RATIO_SWEEP: str = "0,0.1,0.15,0.2"
 
 # -----------------------------------------------------------------------------
-# centroid_nn ensemble
+# centroid_nn ensemble (смесь centroid и nearest)
 # -----------------------------------------------------------------------------
 ENSEMBLE_ALPHA: float = 0.5
 ENSEMBLE_ALPHA_SWEEP: str = "0.3,0.4,0.5,0.6,0.7"

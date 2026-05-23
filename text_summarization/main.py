@@ -1,27 +1,38 @@
+"""
+Точка входа пайплайна суммаризации.
+
+Загружает датасет, прогоняет тексты через seq2seq-модель и сохраняет
+два варианта результата:
+
+  * ``<stem>_summarized<ext>``              — текст заменён суммаризацией;
+  * ``<stem>_original_plus_summary<ext>``   — оригинал и суммаризация
+    конкатенированы через разделитель.
+"""
+
 import argparse
 from pathlib import Path
 
 import pandas as pd
 
 from .config import (
-    SUMMARIZATION_MODEL,
-    TEXT_COLUMN,
-    LABEL_COLUMN,
     BATCH_SIZE,
-    SEPARATOR,
+    LABEL_COLUMN,
     MAX_INPUT_LENGTH,
     MAX_SUMMARY_LENGTH,
     MIN_SUMMARY_LENGTH,
+    SEPARATOR,
+    SUMMARIZATION_MODEL,
+    TEXT_COLUMN,
+)
+from .data import (
+    build_combined_dataset,
+    build_summarized_dataset,
+    derive_output_paths,
+    load_dataset,
+    save_dataset,
 )
 from .model import load_summarization_model
 from .summarize import summarize_dataframe
-from .data import (
-    load_dataset,
-    save_dataset,
-    build_summarized_dataset,
-    build_combined_dataset,
-    derive_output_paths,
-)
 
 
 def run(
@@ -37,19 +48,27 @@ def run(
     min_summary_length: int = MIN_SUMMARY_LENGTH,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Основная функция модуля.
+    Запустить пайплайн суммаризации.
 
-    Args:
-        input_path:  путь к исходному датасету (.csv / .json / .jsonl)
-        output_dir:  директория для сохранения результатов
+    Параметры:
+      input_path   — путь к исходному датасету (.csv / .json / .jsonl);
+      output_dir   — каталог для выходных файлов;
+      model_name   — идентификатор модели на HuggingFace Hub;
+      text_column  — имя колонки с текстом;
+      label_column — имя колонки с меткой (для совместимости интерфейса;
+                     внутри пайплайна метки переносятся как есть, отдельной
+                     обработки им не нужно);
+      batch_size   — размер батча генерации;
+      separator    — разделитель оригинала и суммаризации в комбинированном
+                     датасете.
 
-    Returns:
-        (df_summarized, df_combined) — два итоговых датафрейма
-
-    Сохраняет два файла вида:
-        <output_dir>/<stem>_summarized<ext>
-        <output_dir>/<stem>_original_plus_summary<ext>
+    Возвращает пару ``(df_summarized, df_combined)``; те же датасеты
+    сохраняются на диск.
     """
+    # label_column оставлен для совместимости публичного интерфейса;
+    # внутри он не нужен, поэтому не используется явно.
+    del label_column
+
     input_path = str(input_path)
     output_dir = str(output_dir)
 
@@ -76,8 +95,8 @@ def run(
         batch_size=batch_size,
     )
 
-    df_summarized = build_summarized_dataset(df, summaries, text_column, label_column)
-    df_combined = build_combined_dataset(df, summaries, text_column, label_column, separator)
+    df_summarized = build_summarized_dataset(df, summaries, text_column)
+    df_combined = build_combined_dataset(df, summaries, text_column, separator)
 
     summarized_path, combined_path = derive_output_paths(input_path, output_dir)
 
@@ -94,63 +113,43 @@ def run(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Text summarization pipeline")
     parser.add_argument(
-        "--input-path",
-        type=Path,
-        required=True,
+        "--input-path", type=Path, required=True,
         help="Path to input dataset (.csv, .json, .jsonl)",
     )
     parser.add_argument(
-        "--output-dir",
-        type=Path,
-        required=True,
+        "--output-dir", type=Path, required=True,
         help="Directory where output files will be saved",
     )
     parser.add_argument(
-        "--model-name",
-        type=str,
-        default=SUMMARIZATION_MODEL,
+        "--model-name", type=str, default=SUMMARIZATION_MODEL,
         help="Hugging Face model name for summarization",
     )
     parser.add_argument(
-        "--text-column",
-        type=str,
-        default=TEXT_COLUMN,
+        "--text-column", type=str, default=TEXT_COLUMN,
         help="Name of text column",
     )
     parser.add_argument(
-        "--label-column",
-        type=str,
-        default=LABEL_COLUMN,
+        "--label-column", type=str, default=LABEL_COLUMN,
         help="Name of label column",
     )
     parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=BATCH_SIZE,
+        "--batch-size", type=int, default=BATCH_SIZE,
         help="Batch size for summarization",
     )
     parser.add_argument(
-        "--separator",
-        type=str,
-        default=SEPARATOR,
+        "--separator", type=str, default=SEPARATOR,
         help="Separator between original text and summary in combined dataset",
     )
     parser.add_argument(
-        "--max-input-length",
-        type=int,
-        default=MAX_INPUT_LENGTH,
+        "--max-input-length", type=int, default=MAX_INPUT_LENGTH,
         help="Maximum input token length",
     )
     parser.add_argument(
-        "--max-summary-length",
-        type=int,
-        default=MAX_SUMMARY_LENGTH,
+        "--max-summary-length", type=int, default=MAX_SUMMARY_LENGTH,
         help="Maximum generated summary length",
     )
     parser.add_argument(
-        "--min-summary-length",
-        type=int,
-        default=MIN_SUMMARY_LENGTH,
+        "--min-summary-length", type=int, default=MIN_SUMMARY_LENGTH,
         help="Minimum generated summary length",
     )
     return parser.parse_args()

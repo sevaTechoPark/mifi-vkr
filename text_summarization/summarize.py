@@ -1,19 +1,34 @@
-import torch
+"""
+Пакетная суммаризация текстов.
+
+Содержит обработку отдельного батча и обёртку, которая проходит по
+DataFrame, сохраняя позиционное соответствие: ``summaries[i]`` всегда
+соответствует ``df.iloc[i]``. Пустые и NaN-тексты получают пустую
+суммаризацию и не отправляются в модель.
+"""
+
 import pandas as pd
+import torch
 from tqdm.auto import tqdm
 
 from .config import (
+    BATCH_SIZE,
     MAX_INPUT_LENGTH,
     MAX_SUMMARY_LENGTH,
     MIN_SUMMARY_LENGTH,
-    BATCH_SIZE,
     TEXT_COLUMN,
 )
 
 
 def _effective_max_input(tokenizer, max_input_length: int) -> int:
+    """
+    Эффективный лимит входной длины.
+
+    У некоторых токенизаторов ``model_max_length`` хранит «сторожевое»
+    значение в районе 1e30, означающее «без ограничения». В таком случае
+    используется заданный пользователем ``max_input_length``.
+    """
     tok_max = getattr(tokenizer, "model_max_length", None)
-    # у некоторых токенайзеров model_max_length = очень большое число (вроде 1e30)
     if tok_max is None or tok_max > 10_000:
         return max_input_length
     return min(max_input_length, tok_max)
@@ -28,6 +43,7 @@ def summarize_batch(
     max_summary_length=MAX_SUMMARY_LENGTH,
     min_summary_length=MIN_SUMMARY_LENGTH,
 ) -> list[str]:
+    """Сгенерировать суммаризации для списка текстов одним батчем."""
     if not texts:
         return []
 
@@ -62,12 +78,16 @@ def summarize_dataframe(
     batch_size=BATCH_SIZE,
 ) -> list[str]:
     """
-    Возвращает список summaries длины len(df). summaries[i] строго соответствует df.iloc[i].
-    Пустые/NaN-тексты получают пустую строку и не уходят в модель.
+    Сгенерировать суммаризации для всех строк DataFrame.
+
+    Возвращает список длины ``len(df)``; ``summaries[i]`` соответствует
+    ``df.iloc[i]``. Пустые и NaN-тексты в модель не подаются и получают
+    пустую строку.
     """
     raw_texts = df[text_column].tolist()
 
-    # Готовим параллельные списки: что отдаём в модель + куда положить ответ
+    # Сначала собираем индексы и тексты непустых строк, затем обрабатываем
+    # их батчами и раскладываем результаты по исходным позициям.
     queue_texts: list[str] = []
     queue_positions: list[int] = []
     out: list[str] = [""] * len(raw_texts)

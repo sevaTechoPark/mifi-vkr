@@ -1,24 +1,33 @@
+"""
+Загрузка, сохранение и сборка датасетов для пайплайна суммаризации.
+
+Поддерживаемые форматы — CSV, JSON, JSONL (определяются по расширению).
+Сборка возвращает два варианта датасета: с заменой текста суммаризацией
+и с конкатенацией оригинала и суммаризации через разделитель.
+"""
+
 import os
+
 import pandas as pd
 
-from .config import TEXT_COLUMN, LABEL_COLUMN, SEPARATOR
+from .config import SEPARATOR, TEXT_COLUMN
 
 
 def load_dataset(path: str) -> pd.DataFrame:
-    """Загружает датасет из CSV или JSON/JSONL по расширению файла."""
+    """Загрузить датасет из CSV или JSON/JSONL по расширению файла."""
     ext = os.path.splitext(path)[-1].lower()
     if ext == ".csv":
         return pd.read_csv(path)
-    elif ext in (".json", ".jsonl"):
+    if ext in (".json", ".jsonl"):
         return pd.read_json(path, lines=(ext == ".jsonl"))
-    else:
-        raise ValueError(
-            f"Неподдерживаемый формат файла: {ext}. Используйте .csv / .json / .jsonl"
-        )
+    raise ValueError(
+        f"Неподдерживаемый формат файла: {ext}. "
+        f"Используйте .csv / .json / .jsonl"
+    )
 
 
 def save_dataset(df: pd.DataFrame, path: str) -> None:
-    """Сохраняет датасет в CSV или JSON/JSONL по расширению пути."""
+    """Сохранить датасет в CSV или JSON/JSONL по расширению пути."""
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -40,11 +49,12 @@ def build_summarized_dataset(
     df: pd.DataFrame,
     summaries: list[str],
     text_column: str = TEXT_COLUMN,
-    label_column: str = LABEL_COLUMN,
 ) -> pd.DataFrame:
     """
-    Датасет 1: текст заменяется суммаризацией, метки сохраняются.
-    summaries[i] строго соответствует df.iloc[i].
+    Сборка датасета, в котором текст заменён суммаризацией.
+
+    Элемент ``summaries[i]`` соответствует строке ``df.iloc[i]``.
+    Все остальные колонки (включая метки) сохраняются как есть.
     """
     df_out = df.copy()
     df_out[text_column] = summaries
@@ -55,12 +65,13 @@ def build_combined_dataset(
     df: pd.DataFrame,
     summaries: list[str],
     text_column: str = TEXT_COLUMN,
-    label_column: str = LABEL_COLUMN,
     separator: str = SEPARATOR,
 ) -> pd.DataFrame:
     """
-    Датасет 2: оригинал + суммаризация через разделитель, метки сохраняются.
-    summaries[i] строго соответствует df.iloc[i].
+    Сборка датасета с конкатенацией оригинала и суммаризации.
+
+    В колонке ``text_column`` получается строка
+    ``<оригинал><separator><суммаризация>``. Остальные колонки сохраняются.
     """
     df_out = df.copy()
     df_out[text_column] = [
@@ -72,17 +83,18 @@ def build_combined_dataset(
 
 def derive_output_paths(input_path: str, output_dir: str) -> tuple[str, str]:
     """
-    Формирует имена выходных файлов на основе имени входного файла.
+    Сформировать пути выходных файлов на основе имени входного файла.
 
-    Пример:
+    Пример::
+
         input_path = ".../train_augmented.csv"
-        →  <output_dir>/train_augmented_summarized.csv
-        →  <output_dir>/train_augmented_original_plus_summary.csv
+        → <output_dir>/train_augmented_summarized.csv
+        → <output_dir>/train_augmented_original_plus_summary.csv
     """
     basename = os.path.basename(input_path)
     stem, ext = os.path.splitext(basename)
 
     summarized_path = os.path.join(output_dir, f"{stem}_summarized{ext}")
-    combined_path   = os.path.join(output_dir, f"{stem}_original_plus_summary{ext}")
+    combined_path = os.path.join(output_dir, f"{stem}_original_plus_summary{ext}")
 
     return summarized_path, combined_path

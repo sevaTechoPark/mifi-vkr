@@ -1,3 +1,10 @@
+"""CLI для построения эмбеддингов входного CSV дообученным энкодером.
+
+Читает CSV с колонкой text, прогоняет тексты через LongTextRobertaEmbedder
+и сохраняет матрицу эмбеддингов в .npy. Опционально сохраняет CSV-манифест
+с числом чанков, размерностью и нормой эмбеддинга для каждой строки.
+"""
+
 import argparse
 from dataclasses import fields, replace
 import logging
@@ -9,7 +16,9 @@ import pandas as pd
 from bert_embeddings.config import EmbeddingConfig
 from bert_embeddings.embedding_model import LongTextRobertaEmbedder
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
+    """CLI: --input-csv, --output-npy, --model-dir + поля EmbeddingConfig."""
     parser = argparse.ArgumentParser(
         description="Embed texts with fine-tuned ruRoberta encoder"
     )

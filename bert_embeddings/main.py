@@ -1,3 +1,14 @@
+"""Дообучение sentence-encoder на базе ruRoberta-large.
+
+Энкодер обучается на парах (sentence1, sentence2) с одним из лосс-функций:
+- MNR (MultipleNegativesRankingLoss) — рекомендуемый, использует только positive-пары;
+- CoSENT — обучение по непрерывным score;
+- Softmax — бинарная классификация пар.
+
+Только positive-пары между чанками РАЗНЫХ документов одного класса
+(см. data_utils.build_pair_dataframe).
+"""
+
 from __future__ import annotations
 
 import tempfile
@@ -37,6 +48,7 @@ from bert_embeddings.data_utils import (
 
 
 def cleanup_memory():
+    """Освобождает кэши GPU/MPS между прогонами."""
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -48,6 +60,7 @@ def cleanup_memory():
 
 
 def set_seed(seed: int):
+    """Фиксирует seed для воспроизводимости."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -65,6 +78,7 @@ def build_sentence_transformer(
     max_length: int,
     pooling: str,
 ) -> SentenceTransformer:
+    """Собирает SentenceTransformer из Transformer + Pooling + Normalize."""
     transformer = models.Transformer(
         model_name,
         max_seq_length=max_length,
@@ -98,6 +112,11 @@ def save_encoder_only_from_sentence_transformer(
     save_dir: str | Path,
     meta=None,
 ):
+    """Сохраняет только энкодер (без pooling/normalize) в формате HuggingFace.
+
+    Веса экспортируются с префиксом 'roberta.' — это позволяет потом загружать
+    их прямо в RobertaModel (LongTextRobertaEmbedder).
+    """
     save_path = ensure_dir(save_dir)
     transformer_module = model[0]
     auto_model = transformer_module.auto_model
@@ -121,10 +140,10 @@ def save_encoder_only_from_sentence_transformer(
         json.dump(meta or {}, f, ensure_ascii=False, indent=2)
 
 
-def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
+def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str):
+    """Строит train/valid пары: разворачивает документы в чанки и сэмплирует пары."""
     raw_df = build_training_dataframe(
         train_file,
-        test_path=None,
         text_col=cfg.text_col,
         label_col=cfg.label_col,
     )
@@ -157,7 +176,11 @@ def build_train_and_eval_pairs(cfg: MLMConfig, train_file: str, test_file: str):
 
 
 class FreezeLowerLayersCallback(TrainerCallback):
-    """Замораживает нижние N слоёв энкодера + embeddings на 1-й эпохе."""
+    """Замораживает нижние N слоёв энкодера + embeddings на первой эпохе.
+
+    Это снижает риск разрушения предобученных представлений на старте
+    и ускоряет первую эпоху. После завершения первой эпохи все слои размораживаются.
+    """
 
     def __init__(self, encoder, n_layers_to_freeze: int):
         self.encoder = encoder
@@ -188,7 +211,12 @@ class FreezeLowerLayersCallback(TrainerCallback):
 
 
 class RollingResumeCheckpoint(TrainerCallback):
-    """Перезаписывает один resume_checkpoint.pt после каждой эпохи."""
+    """Перезаписывает один resume_checkpoint.pt после каждой эпохи.
+
+    Запись идёт in-place в существующий файл: Google Drive воспринимает atomic
+    rename как delete+create и отправляет предыдущую версию в корзину, что быстро
+    забивает квоту. In-place запись этого избегает.
+    """
 
     def __init__(self, path: Path, get_model, get_trainer):
         self.path = Path(path)
@@ -210,9 +238,6 @@ class RollingResumeCheckpoint(TrainerCallback):
             "optimizer_state_dict": trainer.optimizer.state_dict() if trainer.optimizer else None,
             "scheduler_state_dict": trainer.lr_scheduler.state_dict() if trainer.lr_scheduler else None,
         }
-        # ВАЖНО: пишем in-place в существующий файл (без atomic rename), чтобы
-        # Google Drive не воспринимал rename как delete+create и не отправлял
-        # предыдущую версию в корзину Drive (что забивает место).
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "wb") as f:
             torch.save(payload, f)
@@ -220,19 +245,24 @@ class RollingResumeCheckpoint(TrainerCallback):
                 f.flush()
                 os.fsync(f.fileno())
             except OSError:
-                # На некоторых FS (включая Drive-маунты) fsync может бросить —
-                # это не критично, данные уже записаны через flush.
+                # На некоторых ФС (включая Drive-маунты) fsync может бросить —
+                # данные уже записаны через flush, это не критично.
                 pass
         return control
 
 
 def run_from_params(
     train_file,
-    test_file,
     output_dir,
     cfg: MLMConfig | None = None,
     **kwargs,
 ):
+    """Основная точка входа обучения. Принимает train-файл и каталог сохранения.
+
+    Дополнительные kwargs позволяют переопределять поля MLMConfig из ноутбука
+    без явного создания cfg. Алиасы num_epochs/batch_size поддерживаются
+    для совместимости с ранее использованным API.
+    """
     if cfg is None:
         cfg = MLMConfig()
 
@@ -257,14 +287,13 @@ def run_from_params(
     metrics_path = output_dir / "metrics.json"
     best_model_dir = output_dir / "best_model"
     resume_ckpt_path = output_dir / "resume_checkpoint.pt"
-    # ВАЖНО: _trainer_tmp пишем в системный tmp (а не на Drive!), потому что
-    # за время обучения Trainer кладёт туда полные чекпоинты модели (~1.4 GB
-    # для ruRoberta-large), и Drive забивается за 2-3 эпохи.
+    # Trainer кладёт полные чекпоинты (~1.4 GB для ruRoberta-large) в output_dir
+    # каждую эпоху. Пишем их в системный tmp, а не на Drive, чтобы не забить квоту.
     trainer_tmp_dir = Path(tempfile.mkdtemp(prefix="st_trainer_tmp_"))
     print(f"[bert_embeddings] Trainer tmp dir: {trainer_tmp_dir}")
 
     raw_df, exploded_df, pair_df, train_ds, valid_ds = build_train_and_eval_pairs(
-        cfg, train_file, test_file
+        cfg, train_file
     )
 
     model = build_sentence_transformer(
@@ -289,6 +318,7 @@ def run_from_params(
         greater_is_better = True
 
     elif train_loss == "mnr":
+        # MNR-loss использует только positive-пары: ему нужно убрать negatives и score.
         pos_mask_train = [int(x) == 1 for x in train_ds["label"]]
         pos_mask_valid = [int(x) == 1 for x in valid_ds["label"]]
         train_ds = train_ds.select([i for i, m in enumerate(pos_mask_train) if m])
@@ -387,7 +417,6 @@ def run_from_params(
         {
             "type": "sentence_transformer_domain_encoder",
             "train_file": str(train_file),
-            "test_file": str(test_file),
             "raw_doc_count": int(len(raw_df)),
             "train_view_count": int(len(exploded_df)),
             "pair_count": int(len(pair_df)),
@@ -396,7 +425,7 @@ def run_from_params(
         }
     )
 
-    # Сохраняем ТОЛЬКО best_model (Trainer уже подтянул лучший в память).
+    # Сохраняем только best_model — Trainer уже подтянул лучшие веса в память.
     if best_model_dir.exists():
         shutil.rmtree(best_model_dir)
     save_encoder_only_from_sentence_transformer(model, best_model_dir, meta=meta)
@@ -436,11 +465,11 @@ def run_from_params(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """CLI: --train-file, --output-dir + все поля MLMConfig как опциональные флаги."""
     parser = argparse.ArgumentParser(
         description="Train sentence embeddings for ruRoberta with text/label input."
     )
     parser.add_argument("--train-file", type=str, required=True)
-    parser.add_argument("--test-file", type=str, required=True)
     parser.add_argument("--output-dir", type=str, required=True)
 
     defaults = {f.name: f.default for f in fields(MLMConfig)}
@@ -473,7 +502,6 @@ def main():
 
     run_from_params(
         train_file=args.train_file,
-        test_file=args.test_file,
         output_dir=args.output_dir,
         cfg=cfg,
     )

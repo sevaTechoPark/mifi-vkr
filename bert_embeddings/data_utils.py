@@ -1,3 +1,11 @@
+"""Подготовка данных для обучения энкодера: загрузка, чанкование, построение пар.
+
+Документы режутся на overlapping-чанки длиной chunk_size токенов, каждому
+чанку приписывается _doc_id исходного документа. При построении positive-пар
+используются только пары чанков РАЗНЫХ документов одного класса —
+это исключает тривиальные positive-пары из соседних чанков одного письма.
+"""
+
 from __future__ import annotations
 
 import random
@@ -17,6 +25,7 @@ def load_labeled_text_csv(
     text_col: str = "text",
     label_col: str = "label",
 ) -> pd.DataFrame:
+    """Загружает CSV с колонками text/label, чистит пустые строки."""
     df = pd.read_csv(path)
     df = df[[text_col, label_col]].dropna().copy()
     df[text_col] = df[text_col].astype(str).str.strip()
@@ -27,19 +36,14 @@ def load_labeled_text_csv(
 
 def build_training_dataframe(
     train_path: str,
-    test_path: str | None = None,
     text_col: str = "text",
     label_col: str = "label",
 ) -> pd.DataFrame:
+    """Строит train-датасет для дообучения энкодера.
+
+    Test-выборка сознательно не используется: дообучение энкодера на тестовых
+    текстах вызвало бы утечку train↔test и завышение метрик в downstream-классификаторе.
     """
-    Готовит train-датасет для обучения энкодера БЕЗ test-данных.
-    test_path принимается ради обратной совместимости и игнорируется при формировании df.
-    """
-    if test_path is not None:
-        print(
-            "[bert_embeddings] build_training_dataframe: test_path передан, "
-            "но НЕ используется для обучения энкодера (защита от утечки train↔test)."
-        )
     return load_labeled_text_csv(train_path, text_col=text_col, label_col=label_col)
 
 
@@ -57,6 +61,11 @@ def split_text_to_training_views(
     chunk_overlap: int = 128,
     add_global_chunk: bool = True,
 ) -> list[str]:
+    """Делит длинный текст на overlapping-чанки в пространстве токенов.
+
+    Дополнительно может добавляться «глобальный» чанк head+tail —
+    он помогает энкодеру видеть начало и конец длинного письма за один проход.
+    """
     token_ids = tokenizer(
         text,
         add_special_tokens=False,
@@ -91,6 +100,7 @@ def split_text_to_training_views(
         if text_piece:
             views.append(text_piece)
 
+    # Дедупликация полностью совпавших чанков (бывает на коротких текстах).
     seen = set()
     deduped = []
     for v in views:
@@ -110,9 +120,10 @@ def explode_long_texts_for_training(
     chunk_overlap: int = 128,
     add_global_chunk: bool = True,
 ) -> pd.DataFrame:
-    """
-    Каждому исходному документу присваиваем уникальный _doc_id, чтобы дальше
-    в build_pair_dataframe можно было строить ТОЛЬКО кросс-документные позитивы.
+    """Разворачивает каждый документ в набор чанков и сохраняет _doc_id.
+
+    _doc_id нужен для последующего построения исключительно кросс-документных
+    positive-пар в build_pair_dataframe.
     """
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -134,7 +145,7 @@ def explode_long_texts_for_training(
             rows.append({text_col: v, label_col: label, DOC_ID_COL: int(doc_id)})
 
     out = pd.DataFrame(rows)
-    # dedup по тексту, но СОХРАНЯЕМ _doc_id первой встречи
+    # При дедупликации по тексту сохраняем _doc_id первой встречи.
     out = out.drop_duplicates(subset=[text_col]).reset_index(drop=True)
     return out
 
@@ -144,7 +155,10 @@ def _sample_cross_doc_positive_pairs(
     max_pairs: int,
     rng: random.Random,
 ):
-    """items: list of (text, doc_id). Возвращает только пары, где doc_id различаются."""
+    """Возвращает positive-пары только между чанками разных документов.
+
+    items: список (text, doc_id). Пары (i, j), где doc_id одинаковый, отбрасываются.
+    """
     if len(items) < 2:
         return []
     cand = [
@@ -164,6 +178,7 @@ def _sample_negative_pairs(
     max_pairs: int,
     rng: random.Random,
 ):
+    """Случайно семплирует negative-пары между разными классами."""
     labels = list(grouped_items.keys())
     if len(labels) < 2 or max_pairs <= 0:
         return []
@@ -196,11 +211,11 @@ def build_pair_dataframe(
     balance_positives: bool = True,
     cross_document_positives_only: bool = True,
 ) -> pd.DataFrame:
-    """
-    Главное отличие от старой версии: позитивы строятся ТОЛЬКО между чанками
-    РАЗНЫХ документов одного класса. Это убирает тривиальные positive-пары
-    из соседних overlapping-чанков одного письма, которые ломали MNR loss
-    (representation collapse).
+    """Строит датасет пар (sentence1, sentence2, score, label) для contrastive-обучения.
+
+    Positive-пары формируются только между чанками РАЗНЫХ документов одного класса
+    (cross_document_positives_only=True). Negative-пары — случайные между разными классами.
+    Колонка score используется loss-функцией CoSENT, колонка label — для бинарного evaluator.
     """
     rng = random.Random(seed)
 
@@ -211,6 +226,8 @@ def build_pair_dataframe(
         doc_id = int(row[DOC_ID_COL]) if has_doc_id else -1
         grouped[row[label_col]].append((row[text_col], doc_id))
 
+    # Балансировка: cap для positive-пар каждого класса берётся как медиана
+    # фактических ограничений, чтобы крупные классы не доминировали в loss.
     if balance_positives:
         per_class_caps = []
         for items in grouped.values():

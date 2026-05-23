@@ -1,3 +1,9 @@
+"""Инференс эмбеддингов длинных текстов на дообученном энкодере ruRoberta.
+
+Документ режется на overlapping-чанки токенов, каждый чанк прогоняется через
+энкодер, эмбеддинги чанков агрегируются (mean/max/mean_max) и нормализуются.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +18,7 @@ from bert_embeddings.config import EmbeddingConfig
 
 
 def mean_pooling(last_hidden_state, attention_mask):
+    """Среднее по токенам с учётом attention_mask."""
     mask = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
     summed = torch.sum(last_hidden_state * mask, dim=1)
     counts = torch.clamp(mask.sum(dim=1), min=1e-9)
@@ -19,6 +26,7 @@ def mean_pooling(last_hidden_state, attention_mask):
 
 
 def masked_max_pooling(last_hidden_state, attention_mask):
+    """Покомпонентный максимум по токенам с маскированием паддинга."""
     mask = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).bool()
     masked = last_hidden_state.masked_fill(~mask, float("-inf"))
     pooled = masked.max(dim=1).values
@@ -27,6 +35,8 @@ def masked_max_pooling(last_hidden_state, attention_mask):
 
 
 class LongTextRobertaEmbedder:
+    """Эмбеддер длинных текстов на ruRoberta с chunk-aware агрегацией."""
+
     def __init__(
         self,
         model_dir,
@@ -63,6 +73,7 @@ class LongTextRobertaEmbedder:
 
         raw_chunk_size = chunk_size if chunk_size is not None else cfg.chunk_size
         raw_chunk_overlap = chunk_overlap if chunk_overlap is not None else cfg.chunk_overlap
+        # Резервируем 2 токена под [CLS]/[SEP].
         self.chunk_size = min(raw_chunk_size, self.max_length - 2)
         self.chunk_overlap = min(raw_chunk_overlap, max(0, self.chunk_size // 2))
 
@@ -94,6 +105,8 @@ class LongTextRobertaEmbedder:
                 raise FileNotFoundError(f"Weights not found: {weights_path}")
 
             state_dict = torch.load(weights_path, map_location="cpu")
+            # При экспорте веса сохраняются с префиксом 'roberta.' — снимаем его
+            # при загрузке в чистый RobertaModel.
             filtered = {
                 k.replace("roberta.", "", 1): v
                 for k, v in state_dict.items()
@@ -121,6 +134,7 @@ class LongTextRobertaEmbedder:
         return encoded["input_ids"]
 
     def _chunk_token_ids(self, text):
+        """Режет токены документа на overlapping-чанки с [CLS]/[SEP] по краям."""
         token_ids = self._tokenize_full(text)
         if not token_ids:
             return []
@@ -141,6 +155,7 @@ class LongTextRobertaEmbedder:
             if end >= len(token_ids):
                 break
 
+        # «Глобальный» чанк head+tail — даёт модели одновременно начало и конец письма.
         if self.add_global_chunk and len(token_ids) > self.chunk_size:
             head = token_ids[: self.chunk_size // 2]
             tail = token_ids[-(self.chunk_size - len(head)) :]
@@ -155,6 +170,7 @@ class LongTextRobertaEmbedder:
 
     @torch.no_grad()
     def _encode_chunk_batch(self, batch_token_ids):
+        """Кодирует батч уже подготовленных чанков (списки token_id с CLS/SEP)."""
         max_len = max(len(x) for x in batch_token_ids)
         pad_id = self.tokenizer.pad_token_id
         input_ids, attention_mask = [], []
@@ -184,6 +200,7 @@ class LongTextRobertaEmbedder:
         return emb.cpu().numpy()
 
     def _aggregate_chunks(self, chunk_embs):
+        """Сводит эмбеддинги чанков в один эмбеддинг документа."""
         if self.chunk_aggregation == "max":
             doc_emb = np.max(chunk_embs, axis=0)
         elif self.chunk_aggregation == "mean_max":
@@ -196,6 +213,7 @@ class LongTextRobertaEmbedder:
         return doc_emb.astype(np.float32)
 
     def encode(self, texts, return_chunk_counts=False):
+        """Возвращает матрицу эмбеддингов документов (N, hidden_size)."""
         doc_embeddings = []
         chunk_counts = []
         hidden = self.model.config.hidden_size

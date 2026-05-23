@@ -1,3 +1,10 @@
+"""Конфигурации обучения и инференса энкодера ruRoberta-large.
+
+MLMConfig — параметры дообучения энкодера через SentenceTransformer.
+EmbeddingConfig — параметры инференса для длинных документов
+(чанкование + агрегация эмбеддингов).
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,8 +15,8 @@ class MLMConfig:
     text_col: str = "text"
     label_col: str = "label"
 
-    # Для ruRoberta-large безопасно держать 512.
-    # Для длинных писем используем chunk-aware обучение/инференс.
+    # Для ruRoberta-large безопасно держать 512 токенов.
+    # Длинные письма обрабатываются через chunk-aware обучение и инференс.
     max_length: int = 512
 
     train_batch_size: int = 32
@@ -20,8 +27,8 @@ class MLMConfig:
     warmup_ratio: float = 0.1
     logging_steps: int = 50
 
-    # На A100 ставим bf16, fp16 отключаем — bf16 стабильнее и нативно поддержан.
-    # На non-A100/без CUDA — bf16=False, fp16=False (выставляется в main.py).
+    # На A100 используется bf16 — стабильнее fp16 и поддержан нативно.
+    # При отсутствии CUDA оба флага принудительно сбрасываются в main.py.
     bf16: bool = True
     fp16: bool = False
     gradient_checkpointing: bool = True
@@ -33,7 +40,8 @@ class MLMConfig:
     val_size: float = 0.1
     early_stopping_patience: int = 3
 
-    # Снижены: 5000 уже даёт качественный сигнал без насыщения MNR.
+    # Ограничение числа пар на класс защищает MNR-loss от насыщения
+    # и снижает суммарный объём пар при многих классах.
     max_pairs_per_label: int = 5000
     max_negative_pairs: int = 5000
     max_eval_pairs_per_label: int = 4000
@@ -45,13 +53,16 @@ class MLMConfig:
     train_chunk_overlap: int = 128
     add_global_chunk_to_training: bool = True
 
-    # Кросс-документные позитивы для MNR (фикс representation collapse).
+    # Кросс-документные позитивы: пары строятся только между чанками
+    # разных документов одного класса. Это убирает тривиальные позитивы
+    # из соседних overlapping-чанков одного письма.
     cross_document_positives_only: bool = True
 
-    # POOLING обучения. На инференсе EmbeddingConfig.pooling ДОЛЖЕН совпадать.
+    # Стратегия пулинга при обучении. На инференсе значение в EmbeddingConfig.pooling
+    # ДОЛЖНО совпадать с этим параметром, иначе эмбеддинги несовместимы.
     sentence_pooling: str = "mean"
 
-    # Заморозить N нижних слоёв на 1-й эпохе (24 слоя у ruRoberta-large).
+    # Заморозка нижних N слоёв на первой эпохе (всего 24 слоя у ruRoberta-large).
     freeze_lower_layers: int = 12
 
 
@@ -60,7 +71,7 @@ class EmbeddingConfig:
     max_length: int = 512
     chunk_size: int = 448
     chunk_overlap: int = 128
-    # MATCH с MLMConfig.sentence_pooling. Не менять без переобучения энкодера.
+    # Должно совпадать с MLMConfig.sentence_pooling, использованным при обучении.
     pooling: str = "mean"
     chunk_aggregation: str = "mean"
     batch_size: int = 8

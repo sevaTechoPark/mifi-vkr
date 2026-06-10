@@ -59,8 +59,6 @@
 | cosine_similarity centroid | 0.476 | 0.470 |
 | cosine_similarity nearest | 0.476 | 0.487 |
 
-> Результаты `[custom_embedder] hybrid MLP` и `[custom_embedder] hybrid classical` в логе отсутствуют — добавить, когда будут запуски.
-
 ---
 
 ## 3. train_summarized.csv

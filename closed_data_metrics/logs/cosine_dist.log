@@ -1,0 +1,106 @@
+/usr/lib/python3.10/runpy.py:126: RuntimeWarning: 'cosine_similarity_classification.main' found in sys.modules after import of package 'cosine_similarity_classification', but prior to execution of 'cosine_similarity_classification.main'; this may result in unpredictable behaviour
+  warn(RuntimeWarning(msg))
+[ARGS] {'train': './data/train.csv', 'test': './data/test.csv', 'model_dir': './bert-embeddings-out-train', 'device': None, 'base_model_name': 'ai-forever/ruRoberta-large', 'text_col': 'text', 'label_col': 'label', 'method': 'all', 'max_length': 512, 'chunk_size': 448, 'chunk_overlap': 128, 'pooling': 'mean', 'chunk_aggregation': 'mean', 'batch_size': 8, 'knn_k': 5, 'knn_temperature': 0.1, 'knn_k_sweep': '1,3,5,7,9,11,15,21,31', 'knn_t_sweep': '0.03,0.05,0.1,0.15,0.2,0.3', 'centroid_trim': 0.15, 'centroid_trim_mode': 'soft', 'centroid_trim_power': 4.0, 'centroid_trim_power_sweep': '2,4,6,8', 'centroid_trim_mode_sweep': 'hard,soft', 'centroid_trim_ratio_sweep': '0,0.1,0.15,0.2', 'centroid_refine_iters': 1, 'ensemble_alpha': 0.5, 'ensemble_alpha_sweep': '0.3,0.4,0.5,0.6,0.7', 'results_out': None}
+Loaded encoder weights from: bert-embeddings-out-train/pytorch_model.bin
+Missing keys: 0
+Unexpected keys: 0
+[INFO] Using device: cuda
+[INFO] train_embs.shape=(1422, 1024), test_embs.shape=(355, 1024)
+
+=== Method: Cosine-Centroid ===
+--- Cosine-Centroid sweep (mode × ratio × power) ---
+  mode=soft ratio=0.15 power= 8.0: balanced_accuracy=0.547754, macro_f1=0.515776 ← best
+  mode=soft ratio=0.00 power= 6.0: balanced_accuracy=0.547440, macro_f1=0.515380
+  mode=soft ratio=0.00 power= 8.0: balanced_accuracy=0.547440, macro_f1=0.515380
+  mode=soft ratio=0.10 power= 8.0: balanced_accuracy=0.546833, macro_f1=0.514560
+  mode=hard ratio=0.15 power= 1.0: balanced_accuracy=0.548869, macro_f1=0.513939
+  mode=hard ratio=0.10 power= 1.0: balanced_accuracy=0.547947, macro_f1=0.512822
+  mode=soft ratio=0.10 power= 2.0: balanced_accuracy=0.547947, macro_f1=0.512697
+  mode=soft ratio=0.15 power= 2.0: balanced_accuracy=0.547440, macro_f1=0.512649
+  mode=soft ratio=0.15 power= 4.0: balanced_accuracy=0.547440, macro_f1=0.512649
+  mode=soft ratio=0.15 power= 6.0: balanced_accuracy=0.547440, macro_f1=0.512634
+  mode=soft ratio=0.00 power= 4.0: balanced_accuracy=0.547127, macro_f1=0.512222
+  mode=hard ratio=0.00 power= 1.0: balanced_accuracy=0.547127, macro_f1=0.512190
+  mode=soft ratio=0.00 power= 2.0: balanced_accuracy=0.547127, macro_f1=0.512190
+  mode=soft ratio=0.10 power= 4.0: balanced_accuracy=0.546519, macro_f1=0.511407
+  mode=soft ratio=0.10 power= 6.0: balanced_accuracy=0.546519, macro_f1=0.511407
+  mode=soft ratio=0.20 power= 8.0: balanced_accuracy=0.531331, macro_f1=0.507967
+  mode=hard ratio=0.20 power= 1.0: balanced_accuracy=0.532233, macro_f1=0.506153
+  mode=soft ratio=0.20 power= 2.0: balanced_accuracy=0.532233, macro_f1=0.506153
+  mode=soft ratio=0.20 power= 4.0: balanced_accuracy=0.531017, macro_f1=0.504831
+  mode=soft ratio=0.20 power= 6.0: balanced_accuracy=0.531017, macro_f1=0.504831
+Cosine-Centroid: {'balanced_accuracy': 0.547754, 'macro_f1': 0.515776}
+
+=== Method: Cosine-Nearest ===
+--- Cosine-Nearest sweep (k × T) ---
+  k=  1 T=0.030: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  1 T=0.050: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  1 T=0.100: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  1 T=0.150: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  1 T=0.200: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  1 T=0.300: balanced_accuracy=0.519802, macro_f1=0.542293
+  k=  3 T=0.030: balanced_accuracy=0.502135, macro_f1=0.535965
+  k=  3 T=0.050: balanced_accuracy=0.502135, macro_f1=0.535965
+  k=  3 T=0.100: balanced_accuracy=0.487849, macro_f1=0.516625
+  k=  3 T=0.150: balanced_accuracy=0.487849, macro_f1=0.516625
+  k=  3 T=0.200: balanced_accuracy=0.487849, macro_f1=0.516625
+  k=  3 T=0.300: balanced_accuracy=0.487849, macro_f1=0.516625
+  k=  5 T=0.030: balanced_accuracy=0.505097, macro_f1=0.540959
+  k=  5 T=0.050: balanced_accuracy=0.490811, macro_f1=0.521573
+  k=  5 T=0.100: balanced_accuracy=0.476526, macro_f1=0.511441
+  k=  5 T=0.150: balanced_accuracy=0.476526, macro_f1=0.511551
+  k=  5 T=0.200: balanced_accuracy=0.476526, macro_f1=0.511551
+  k=  5 T=0.300: balanced_accuracy=0.476526, macro_f1=0.511551
+  k=  7 T=0.030: balanced_accuracy=0.507015, macro_f1=0.546680 ← best
+  k=  7 T=0.050: balanced_accuracy=0.478444, macro_f1=0.515295
+  k=  7 T=0.100: balanced_accuracy=0.479872, macro_f1=0.512950
+  k=  7 T=0.150: balanced_accuracy=0.479872, macro_f1=0.512950
+  k=  7 T=0.200: balanced_accuracy=0.479872, macro_f1=0.512950
+  k=  7 T=0.300: balanced_accuracy=0.465586, macro_f1=0.493673
+  k=  9 T=0.030: balanced_accuracy=0.492729, macro_f1=0.535308
+  k=  9 T=0.050: balanced_accuracy=0.479872, macro_f1=0.515500
+  k=  9 T=0.100: balanced_accuracy=0.465586, macro_f1=0.492810
+  k=  9 T=0.150: balanced_accuracy=0.437636, macro_f1=0.454915
+  k=  9 T=0.200: balanced_accuracy=0.437636, macro_f1=0.454915
+  k=  9 T=0.300: balanced_accuracy=0.437636, macro_f1=0.454915
+  k= 11 T=0.030: balanced_accuracy=0.478444, macro_f1=0.515686
+  k= 11 T=0.050: balanced_accuracy=0.465586, macro_f1=0.494034
+  k= 11 T=0.100: balanced_accuracy=0.451301, macro_f1=0.473533
+  k= 11 T=0.150: balanced_accuracy=0.437015, macro_f1=0.453730
+  k= 11 T=0.200: balanced_accuracy=0.437015, macro_f1=0.453730
+  k= 11 T=0.300: balanced_accuracy=0.437015, macro_f1=0.453730
+  k= 15 T=0.030: balanced_accuracy=0.465348, macro_f1=0.496218
+  k= 15 T=0.050: balanced_accuracy=0.466777, macro_f1=0.495224
+  k= 15 T=0.100: balanced_accuracy=0.438827, macro_f1=0.456059
+  k= 15 T=0.150: balanced_accuracy=0.434745, macro_f1=0.450754
+  k= 15 T=0.200: balanced_accuracy=0.434745, macro_f1=0.450754
+  k= 15 T=0.300: balanced_accuracy=0.434745, macro_f1=0.450754
+  k= 21 T=0.030: balanced_accuracy=0.467699, macro_f1=0.497263
+  k= 21 T=0.050: balanced_accuracy=0.467699, macro_f1=0.494436
+  k= 21 T=0.100: balanced_accuracy=0.443320, macro_f1=0.460335
+  k= 21 T=0.150: balanced_accuracy=0.439238, macro_f1=0.455034
+  k= 21 T=0.200: balanced_accuracy=0.439238, macro_f1=0.455034
+  k= 21 T=0.300: balanced_accuracy=0.439238, macro_f1=0.455034
+  k= 31 T=0.030: balanced_accuracy=0.465586, macro_f1=0.494256
+  k= 31 T=0.050: balanced_accuracy=0.465586, macro_f1=0.492789
+  k= 31 T=0.100: balanced_accuracy=0.433555, macro_f1=0.449596
+  k= 31 T=0.150: balanced_accuracy=0.433555, macro_f1=0.449493
+  k= 31 T=0.200: balanced_accuracy=0.437126, macro_f1=0.452970
+  k= 31 T=0.300: balanced_accuracy=0.437126, macro_f1=0.452970
+Cosine-Nearest: {'balanced_accuracy': 0.507015, 'macro_f1': 0.546680}
+
+=== Method: Cosine-CentroidNN ===
+--- Cosine-CentroidNN sweep (ensemble_alpha) ---
+  alpha=0.30: balanced_accuracy=0.476526, macro_f1=0.510323
+  alpha=0.40: balanced_accuracy=0.476526, macro_f1=0.509707
+  alpha=0.50: balanced_accuracy=0.477716, macro_f1=0.510625
+  alpha=0.60: balanced_accuracy=0.477716, macro_f1=0.510923 ← best
+  alpha=0.70: balanced_accuracy=0.477716, macro_f1=0.508578
+Cosine-CentroidNN: {'balanced_accuracy': 0.477716, 'macro_f1': 0.510923}
+
+=== TOP по macro_f1 ===
+  0.5070 / f1=0.5467  Cosine-Nearest
+  0.5478 / f1=0.5158  Cosine-Centroid
+  0.4777 / f1=0.5109  Cosine-CentroidNN
+
+Saved: data/cosine-results-bert-embeddings-out-train-2026-06-12T21:51.json

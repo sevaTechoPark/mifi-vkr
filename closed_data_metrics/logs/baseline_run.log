@@ -1,0 +1,2 @@
+nohup: ввод игнорируется
+BASELINE METRICS: {'balanced_accuracy': 0.579, 'macro_f1': 0.582}

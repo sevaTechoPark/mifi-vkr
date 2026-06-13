@@ -1,0 +1,32 @@
+{
+  "base_model_name": "ai-forever/ruRoberta-large",
+  "model_dir": "./bert-embeddings-out-train",
+  "text_col": "text",
+  "label_col": "label",
+  "max_length": 512,
+  "chunk_size": 448,
+  "chunk_overlap": 128,
+  "pooling": "mean",
+  "chunk_aggregation": "mean",
+  "bert_batch_size": 8,
+  "bert_weight": 5.0,
+  "bert_scaler_used": false,
+  "bert_weight_with_model_dir": 5.0,
+  "bert_weight_base_model": 1.0,
+  "svd_components": 0,
+  "train_shape": [
+    1422,
+    143195
+  ],
+  "test_shape": [
+    355,
+    143195
+  ],
+  "tfidf_dim": 142171,
+  "bert_dim": 1024,
+  "bert_share_mean": 0.9615384641575575,
+  "bert_l2_per_block": true,
+  "hybrid_final_l2": true,
+  "hybrid_noL2_file": "X_train_hybrid_noL2.npz",
+  "bert_only_file": "X_train_bert.npy"
+}

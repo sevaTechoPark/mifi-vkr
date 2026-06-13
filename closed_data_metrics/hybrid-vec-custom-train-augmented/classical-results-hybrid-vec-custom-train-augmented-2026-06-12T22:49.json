@@ -1,0 +1,792 @@
+{
+  "class_weight": "balanced",
+  "feature_sources": [
+    "bert_only",
+    "hybrid",
+    "tfidf_only"
+  ],
+  "c_grid": [
+    0.05,
+    0.1,
+    0.3,
+    0.5,
+    1.0,
+    2.0,
+    3.0,
+    5.0
+  ],
+  "min_class_count": 25,
+  "num_classes": 35,
+  "n_models_ok": 95,
+  "n_models_total": 95,
+  "top_model": {
+    "model": "RidgeClassifier[tfidf_only]",
+    "model_key": "ridge_classifier",
+    "feature_source": "tfidf_only",
+    "C": null,
+    "balanced_accuracy": 0.612472,
+    "macro_f1": 0.608625
+  },
+  "results": [
+    {
+      "model": "LinearSVC[bert_only] C=0.05",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.581842,
+      "macro_f1": 0.609792
+    },
+    {
+      "model": "LinearSVC[bert_only] C=0.1",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.573838,
+      "macro_f1": 0.601061
+    },
+    {
+      "model": "LinearSVC[bert_only] C=0.3",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.579553,
+      "macro_f1": 0.608091
+    },
+    {
+      "model": "LinearSVC[bert_only] C=0.5",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.579553,
+      "macro_f1": 0.608091
+    },
+    {
+      "model": "LinearSVC[bert_only] C=1.0",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.579553,
+      "macro_f1": 0.609603
+    },
+    {
+      "model": "LinearSVC[bert_only] C=2.0",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.578931,
+      "macro_f1": 0.607685
+    },
+    {
+      "model": "LinearSVC[bert_only] C=3.0",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.578931,
+      "macro_f1": 0.60787
+    },
+    {
+      "model": "LinearSVC[bert_only] C=5.0",
+      "model_key": "linear_svc",
+      "feature_source": "bert_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.578931,
+      "macro_f1": 0.60787
+    },
+    {
+      "model": "LinearSVC[bert_only] C=0.05 ★best",
+      "model_key": "linear_svc_best",
+      "feature_source": "bert_only",
+      "best_C": 0.05,
+      "balanced_accuracy": 0.581842,
+      "macro_f1": 0.609792
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=0.05",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.584495,
+      "macro_f1": 0.610135
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=0.1",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.584112,
+      "macro_f1": 0.611225
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=0.3",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.584112,
+      "macro_f1": 0.610364
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=0.5",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.584112,
+      "macro_f1": 0.610364
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=1.0",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=2.0",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=3.0",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612283
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=5.0",
+      "model_key": "logreg",
+      "feature_source": "bert_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.578398,
+      "macro_f1": 0.603394
+    },
+    {
+      "model": "LogisticRegression[bert_only] C=1.0 ★best",
+      "model_key": "logreg_best",
+      "feature_source": "bert_only",
+      "best_C": 1.0,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=0.05",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.205179,
+      "macro_f1": 0.126995
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=0.1",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.56128,
+      "macro_f1": 0.587438
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=0.3",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.580209,
+      "macro_f1": 0.61084
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=0.5",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.580209,
+      "macro_f1": 0.611654
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=1.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.587352,
+      "macro_f1": 0.618221
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=2.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.587973,
+      "macro_f1": 0.620133
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=3.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.587352,
+      "macro_f1": 0.618221
+    },
+    {
+      "model": "LinearSVC-L1[bert_only] C=5.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "bert_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.585924,
+      "macro_f1": 0.615346
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=0.05",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.028571,
+      "macro_f1": 0.00095
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=0.1",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.028571,
+      "macro_f1": 0.000794
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=0.3",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.547223,
+      "macro_f1": 0.581049
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=0.5",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.547223,
+      "macro_f1": 0.579524
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=1.0",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.551716,
+      "macro_f1": 0.584122
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=2.0",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.570084,
+      "macro_f1": 0.605285
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=3.0",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.577227,
+      "macro_f1": 0.610461
+    },
+    {
+      "model": "LogisticRegression-L1[bert_only] C=5.0",
+      "model_key": "logreg_l1",
+      "feature_source": "bert_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.577227,
+      "macro_f1": 0.610461
+    },
+    {
+      "model": "LinearSVC-CalibratedSigmoid[bert_only] C=0.05",
+      "model_key": "linear_svc_calibrated_sigmoid",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.572401,
+      "macro_f1": 0.604012
+    },
+    {
+      "model": "LinearSVC-CalibratedIsotonic[bert_only] C=0.05",
+      "model_key": "linear_svc_calibrated_isotonic",
+      "feature_source": "bert_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.578368,
+      "macro_f1": 0.609695
+    },
+    {
+      "model": "RidgeClassifier[bert_only]",
+      "model_key": "ridge_classifier",
+      "feature_source": "bert_only",
+      "C": null,
+      "balanced_accuracy": 0.586459,
+      "macro_f1": 0.611823
+    },
+    {
+      "model": "LinearSVC[hybrid] C=0.05",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 0.05,
+      "balanced_accuracy": 0.57911,
+      "macro_f1": 0.605285
+    },
+    {
+      "model": "LinearSVC[hybrid] C=0.1",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 0.1,
+      "balanced_accuracy": 0.580122,
+      "macro_f1": 0.607061
+    },
+    {
+      "model": "LinearSVC[hybrid] C=0.3",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 0.3,
+      "balanced_accuracy": 0.580122,
+      "macro_f1": 0.607237
+    },
+    {
+      "model": "LinearSVC[hybrid] C=0.5",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 0.5,
+      "balanced_accuracy": 0.580122,
+      "macro_f1": 0.607237
+    },
+    {
+      "model": "LinearSVC[hybrid] C=1.0",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 1.0,
+      "balanced_accuracy": 0.580122,
+      "macro_f1": 0.607237
+    },
+    {
+      "model": "LinearSVC[hybrid] C=2.0",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 2.0,
+      "balanced_accuracy": 0.57655,
+      "macro_f1": 0.60237
+    },
+    {
+      "model": "LinearSVC[hybrid] C=3.0",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 3.0,
+      "balanced_accuracy": 0.57655,
+      "macro_f1": 0.60237
+    },
+    {
+      "model": "LinearSVC[hybrid] C=5.0",
+      "model_key": "linear_svc",
+      "feature_source": "hybrid",
+      "C": 5.0,
+      "balanced_accuracy": 0.577979,
+      "macro_f1": 0.604233
+    },
+    {
+      "model": "LinearSVC[hybrid] C=0.1 ★best",
+      "model_key": "linear_svc_best",
+      "feature_source": "hybrid",
+      "best_C": 0.1,
+      "balanced_accuracy": 0.580122,
+      "macro_f1": 0.607061
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=0.05",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 0.05,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=0.1",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 0.1,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=0.3",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 0.3,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612283
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=0.5",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 0.5,
+      "balanced_accuracy": 0.578398,
+      "macro_f1": 0.603335
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=1.0",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 1.0,
+      "balanced_accuracy": 0.577299,
+      "macro_f1": 0.602414
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=2.0",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 2.0,
+      "balanced_accuracy": 0.577299,
+      "macro_f1": 0.603935
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=3.0",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 3.0,
+      "balanced_accuracy": 0.577299,
+      "macro_f1": 0.603935
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=5.0",
+      "model_key": "logreg",
+      "feature_source": "hybrid",
+      "C": 5.0,
+      "balanced_accuracy": 0.577299,
+      "macro_f1": 0.604306
+    },
+    {
+      "model": "LogisticRegression[hybrid] C=0.05 ★best",
+      "model_key": "logreg_best",
+      "feature_source": "hybrid",
+      "best_C": 0.05,
+      "balanced_accuracy": 0.584733,
+      "macro_f1": 0.612343
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=0.05",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 0.05,
+      "balanced_accuracy": 0.587339,
+      "macro_f1": 0.616026
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=0.1",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 0.1,
+      "balanced_accuracy": 0.586148,
+      "macro_f1": 0.615088
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=0.3",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 0.3,
+      "balanced_accuracy": 0.586162,
+      "macro_f1": 0.617221
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=0.5",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 0.5,
+      "balanced_accuracy": 0.585924,
+      "macro_f1": 0.616274
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=1.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 1.0,
+      "balanced_accuracy": 0.581221,
+      "macro_f1": 0.610776
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=2.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 2.0,
+      "balanced_accuracy": 0.58092,
+      "macro_f1": 0.611881
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=3.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 3.0,
+      "balanced_accuracy": 0.58092,
+      "macro_f1": 0.611881
+    },
+    {
+      "model": "LinearSVC-L1[hybrid] C=5.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "hybrid",
+      "C": 5.0,
+      "balanced_accuracy": 0.574016,
+      "macro_f1": 0.603955
+    },
+    {
+      "model": "LinearSVC-CalibratedSigmoid[hybrid] C=0.1",
+      "model_key": "linear_svc_calibrated_sigmoid",
+      "feature_source": "hybrid",
+      "C": 0.1,
+      "balanced_accuracy": 0.575267,
+      "macro_f1": 0.604676
+    },
+    {
+      "model": "LinearSVC-CalibratedIsotonic[hybrid] C=0.1",
+      "model_key": "linear_svc_calibrated_isotonic",
+      "feature_source": "hybrid",
+      "C": 0.1,
+      "balanced_accuracy": 0.593328,
+      "macro_f1": 0.623797
+    },
+    {
+      "model": "RidgeClassifier[hybrid]",
+      "model_key": "ridge_classifier",
+      "feature_source": "hybrid",
+      "C": null,
+      "balanced_accuracy": 0.596863,
+      "macro_f1": 0.623032
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=0.05",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.569698,
+      "macro_f1": 0.55239
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=0.1",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.583161,
+      "macro_f1": 0.571888
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=0.3",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.601246,
+      "macro_f1": 0.598441
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=0.5",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.602224,
+      "macro_f1": 0.601832
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=1.0",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.58786,
+      "macro_f1": 0.59175
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=2.0",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.5882,
+      "macro_f1": 0.595587
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=3.0",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.590526,
+      "macro_f1": 0.596751
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=5.0",
+      "model_key": "linear_svc",
+      "feature_source": "tfidf_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.597669,
+      "macro_f1": 0.605758
+    },
+    {
+      "model": "LinearSVC[tfidf_only] C=0.5 ★best",
+      "model_key": "linear_svc_best",
+      "feature_source": "tfidf_only",
+      "best_C": 0.5,
+      "balanced_accuracy": 0.602224,
+      "macro_f1": 0.601832
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=0.05",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.531259,
+      "macro_f1": 0.489182
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=0.1",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.534018,
+      "macro_f1": 0.493662
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=0.3",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.532567,
+      "macro_f1": 0.513973
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=0.5",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.542445,
+      "macro_f1": 0.535449
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=1.0",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.546782,
+      "macro_f1": 0.552505
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=2.0",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.55473,
+      "macro_f1": 0.561954
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=3.0",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.530809,
+      "macro_f1": 0.539024
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=5.0",
+      "model_key": "logreg",
+      "feature_source": "tfidf_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.532502,
+      "macro_f1": 0.54326
+    },
+    {
+      "model": "LogisticRegression[tfidf_only] C=2.0 ★best",
+      "model_key": "logreg_best",
+      "feature_source": "tfidf_only",
+      "best_C": 2.0,
+      "balanced_accuracy": 0.55473,
+      "macro_f1": 0.561954
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=0.05",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 0.05,
+      "balanced_accuracy": 0.028571,
+      "macro_f1": 0.006681
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=0.1",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 0.1,
+      "balanced_accuracy": 0.209117,
+      "macro_f1": 0.128254
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=0.3",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 0.3,
+      "balanced_accuracy": 0.556885,
+      "macro_f1": 0.469014
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=0.5",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.565586,
+      "macro_f1": 0.50824
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=1.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 1.0,
+      "balanced_accuracy": 0.549898,
+      "macro_f1": 0.509825
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=2.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 2.0,
+      "balanced_accuracy": 0.556517,
+      "macro_f1": 0.532909
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=3.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 3.0,
+      "balanced_accuracy": 0.561082,
+      "macro_f1": 0.558223
+    },
+    {
+      "model": "LinearSVC-L1[tfidf_only] C=5.0",
+      "model_key": "linear_svc_l1",
+      "feature_source": "tfidf_only",
+      "C": 5.0,
+      "balanced_accuracy": 0.558699,
+      "macro_f1": 0.553878
+    },
+    {
+      "model": "LinearSVC-CalibratedSigmoid[tfidf_only] C=0.5",
+      "model_key": "linear_svc_calibrated_sigmoid",
+      "feature_source": "tfidf_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.513887,
+      "macro_f1": 0.519186
+    },
+    {
+      "model": "LinearSVC-CalibratedIsotonic[tfidf_only] C=0.5",
+      "model_key": "linear_svc_calibrated_isotonic",
+      "feature_source": "tfidf_only",
+      "C": 0.5,
+      "balanced_accuracy": 0.545793,
+      "macro_f1": 0.560143
+    },
+    {
+      "model": "RidgeClassifier[tfidf_only]",
+      "model_key": "ridge_classifier",
+      "feature_source": "tfidf_only",
+      "C": null,
+      "balanced_accuracy": 0.612472,
+      "macro_f1": 0.608625
+    }
+  ]
+}

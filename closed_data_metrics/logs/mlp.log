@@ -1,0 +1,49 @@
+[INFO] Using device: cuda
+[hybrid_mlp] using profile: 'noisy' (auto for features='hybrid')
+[hybrid_mlp] using SPARSE→DENSE hybrid features: dim=143195
+[hybrid_mlp] MLP-StrongMLP[hybrid] | input_dim=143195 num_classes=35 params=75,565,091
+[hybrid_mlp] hidden_dim=512 blocks=2 dropout=0.4 lr=0.0003 wd=0.01 bs=128 focal_gamma=1.0 ls=0.05 mixup=0.2 class_weight=True
+epoch=  1 lr=3.00e-04 train_loss=3.201011 metrics={'balanced_accuracy': 0.470304, 'macro_f1': 0.449251}
+epoch=  2 lr=2.98e-04 train_loss=2.343974 metrics={'balanced_accuracy': 0.494146, 'macro_f1': 0.476253}
+epoch=  3 lr=2.96e-04 train_loss=1.802038 metrics={'balanced_accuracy': 0.524425, 'macro_f1': 0.500114}
+epoch=  4 lr=2.93e-04 train_loss=1.583623 metrics={'balanced_accuracy': 0.534019, 'macro_f1': 0.51962}
+epoch=  5 lr=2.89e-04 train_loss=1.221786 metrics={'balanced_accuracy': 0.560821, 'macro_f1': 0.54364}
+epoch=  6 lr=2.84e-04 train_loss=0.738365 metrics={'balanced_accuracy': 0.545411, 'macro_f1': 0.548336}
+epoch=  7 lr=2.78e-04 train_loss=0.542562 metrics={'balanced_accuracy': 0.574928, 'macro_f1': 0.570104}
+epoch=  8 lr=2.71e-04 train_loss=0.486194 metrics={'balanced_accuracy': 0.572667, 'macro_f1': 0.569387}
+epoch=  9 lr=2.64e-04 train_loss=0.515508 metrics={'balanced_accuracy': 0.558268, 'macro_f1': 0.575565}
+epoch= 10 lr=2.56e-04 train_loss=1.504986 metrics={'balanced_accuracy': 0.586161, 'macro_f1': 0.587803}
+epoch= 11 lr=2.48e-04 train_loss=0.358583 metrics={'balanced_accuracy': 0.569054, 'macro_f1': 0.566883}
+epoch= 12 lr=2.38e-04 train_loss=0.376323 metrics={'balanced_accuracy': 0.572495, 'macro_f1': 0.589767}
+epoch= 13 lr=2.29e-04 train_loss=0.648193 metrics={'balanced_accuracy': 0.589788, 'macro_f1': 0.598406}
+epoch= 14 lr=2.18e-04 train_loss=0.490075 metrics={'balanced_accuracy': 0.581981, 'macro_f1': 0.583667}
+epoch= 15 lr=2.08e-04 train_loss=0.330984 metrics={'balanced_accuracy': 0.559708, 'macro_f1': 0.568043}
+epoch= 16 lr=1.97e-04 train_loss=0.541772 metrics={'balanced_accuracy': 0.558165, 'macro_f1': 0.556166}
+epoch= 17 lr=1.85e-04 train_loss=0.593835 metrics={'balanced_accuracy': 0.614003, 'macro_f1': 0.616574}
+epoch= 18 lr=1.74e-04 train_loss=0.246000 metrics={'balanced_accuracy': 0.573197, 'macro_f1': 0.60357}
+epoch= 19 lr=1.62e-04 train_loss=0.602322 metrics={'balanced_accuracy': 0.574995, 'macro_f1': 0.585183}
+epoch= 20 lr=1.50e-04 train_loss=0.548844 metrics={'balanced_accuracy': 0.605581, 'macro_f1': 0.610829}
+epoch= 21 lr=1.39e-04 train_loss=0.442781 metrics={'balanced_accuracy': 0.595823, 'macro_f1': 0.601425}
+epoch= 22 lr=1.27e-04 train_loss=0.282650 metrics={'balanced_accuracy': 0.581937, 'macro_f1': 0.601163}
+epoch= 23 lr=1.16e-04 train_loss=0.367951 metrics={'balanced_accuracy': 0.610297, 'macro_f1': 0.611128}
+epoch= 24 lr=1.04e-04 train_loss=0.312257 metrics={'balanced_accuracy': 0.598768, 'macro_f1': 0.608139}
+epoch= 25 lr=9.33e-05 train_loss=0.398510 metrics={'balanced_accuracy': 0.594635, 'macro_f1': 0.599538}
+epoch= 26 lr=8.26e-05 train_loss=0.434551 metrics={'balanced_accuracy': 0.60528, 'macro_f1': 0.61396}
+epoch= 27 lr=7.24e-05 train_loss=0.382357 metrics={'balanced_accuracy': 0.60823, 'macro_f1': 0.621741}
+epoch= 28 lr=6.26e-05 train_loss=0.441376 metrics={'balanced_accuracy': 0.589182, 'macro_f1': 0.602171}
+epoch= 29 lr=5.34e-05 train_loss=0.616293 metrics={'balanced_accuracy': 0.594618, 'macro_f1': 0.600344}
+epoch= 30 lr=4.48e-05 train_loss=0.554300 metrics={'balanced_accuracy': 0.609512, 'macro_f1': 0.615432}
+epoch= 31 lr=3.68e-05 train_loss=0.417226 metrics={'balanced_accuracy': 0.608039, 'macro_f1': 0.618085}
+epoch= 32 lr=2.96e-05 train_loss=0.357662 metrics={'balanced_accuracy': 0.607948, 'macro_f1': 0.619883}
+epoch= 33 lr=2.30e-05 train_loss=0.304078 metrics={'balanced_accuracy': 0.608569, 'macro_f1': 0.620949}
+epoch= 34 lr=1.73e-05 train_loss=0.337770 metrics={'balanced_accuracy': 0.590712, 'macro_f1': 0.60418}
+epoch= 35 lr=1.24e-05 train_loss=0.515079 metrics={'balanced_accuracy': 0.590712, 'macro_f1': 0.602364}
+epoch= 36 lr=8.32e-06 train_loss=0.345076 metrics={'balanced_accuracy': 0.590712, 'macro_f1': 0.602364}
+epoch= 37 lr=5.13e-06 train_loss=0.252546 metrics={'balanced_accuracy': 0.595474, 'macro_f1': 0.609167}
+epoch= 38 lr=2.84e-06 train_loss=0.295098 metrics={'balanced_accuracy': 0.609759, 'macro_f1': 0.620156}
+epoch= 39 lr=1.46e-06 train_loss=0.321279 metrics={'balanced_accuracy': 0.609759, 'macro_f1': 0.620156}
+Early stopping at epoch 39
+
+BEST RESULT
+  MLP-StrongMLP[hybrid]: {'balanced_accuracy': 0.60823, 'macro_f1': 0.621741}  (epoch 27)
+Saved: ./data/hybrid-vec-custom-train/mlp-results-hybrid-vec-custom-train-2026-06-12T21-55.json

@@ -1,0 +1,119 @@
+nohup: ввод игнорируется
+y_train: 1422 объектов, 35 классов, мин. класс = 1 пример(а/ов)
+feature_sources: ('bert_only', 'hybrid', 'tfidf_only') | c_grid: (0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0) | class_weight='balanced'
+
+=== Source: bert_only | shape=(1422, 1024) | class_weight='balanced' ===
+  LinearSVC[bert_only] C=0.05: {'balanced_accuracy': 0.504403, 'macro_f1': 0.518363}
+  LinearSVC[bert_only] C=0.1: {'balanced_accuracy': 0.492238, 'macro_f1': 0.507579}
+  LinearSVC[bert_only] C=0.3: {'balanced_accuracy': 0.516927, 'macro_f1': 0.538973}
+  LinearSVC[bert_only] C=0.5: {'balanced_accuracy': 0.513753, 'macro_f1': 0.534659}
+  LinearSVC[bert_only] C=1.0: {'balanced_accuracy': 0.526063, 'macro_f1': 0.551771}
+  LinearSVC[bert_only] C=2.0: {'balanced_accuracy': 0.537968, 'macro_f1': 0.569282}
+  LinearSVC[bert_only] C=3.0: {'balanced_accuracy': 0.532253, 'macro_f1': 0.561252}
+  LinearSVC[bert_only] C=5.0: {'balanced_accuracy': 0.528405, 'macro_f1': 0.564}
+  ★ best LinearSVC[bert_only]: C=2.0 → {'balanced_accuracy': 0.537968, 'macro_f1': 0.569282}
+  LogisticRegression[bert_only] C=0.05: {'balanced_accuracy': 0.519558, 'macro_f1': 0.496949}
+  LogisticRegression[bert_only] C=0.1: {'balanced_accuracy': 0.524915, 'macro_f1': 0.500846}
+  LogisticRegression[bert_only] C=0.3: {'balanced_accuracy': 0.533292, 'macro_f1': 0.52234}
+  LogisticRegression[bert_only] C=0.5: {'balanced_accuracy': 0.521546, 'macro_f1': 0.512377}
+  LogisticRegression[bert_only] C=1.0: {'balanced_accuracy': 0.519955, 'macro_f1': 0.513569}
+  LogisticRegression[bert_only] C=2.0: {'balanced_accuracy': 0.522701, 'macro_f1': 0.518468}
+  LogisticRegression[bert_only] C=3.0: {'balanced_accuracy': 0.523984, 'macro_f1': 0.51938}
+  LogisticRegression[bert_only] C=5.0: {'balanced_accuracy': 0.533304, 'macro_f1': 0.531775}
+  ★ best LogisticRegression[bert_only]: C=5.0 → {'balanced_accuracy': 0.533304, 'macro_f1': 0.531775}
+  LinearSVC-L1[bert_only] C=0.05: {'balanced_accuracy': 0.028571, 'macro_f1': 0.006681}
+  LinearSVC-L1[bert_only] C=0.1: {'balanced_accuracy': 0.385092, 'macro_f1': 0.268974}
+  LinearSVC-L1[bert_only] C=0.3: {'balanced_accuracy': 0.470916, 'macro_f1': 0.488453}
+  LinearSVC-L1[bert_only] C=0.5: {'balanced_accuracy': 0.475143, 'macro_f1': 0.490805}
+  LinearSVC-L1[bert_only] C=1.0: {'balanced_accuracy': 0.499097, 'macro_f1': 0.51791}
+  LinearSVC-L1[bert_only] C=2.0: {'balanced_accuracy': 0.503565, 'macro_f1': 0.522257}
+  LinearSVC-L1[bert_only] C=3.0: {'balanced_accuracy': 0.528422, 'macro_f1': 0.542468}
+  LinearSVC-L1[bert_only] C=5.0: {'balanced_accuracy': 0.534576, 'macro_f1': 0.551208}
+  ★ best LinearSVC-L1[bert_only]: C=5.0 → {'balanced_accuracy': 0.534576, 'macro_f1': 0.551208}
+  LogisticRegression-L1[bert_only] C=0.05: {'balanced_accuracy': 0.028571, 'macro_f1': 0.00032}
+  LogisticRegression-L1[bert_only] C=0.1: {'balanced_accuracy': 0.028571, 'macro_f1': 0.000479}
+  LogisticRegression-L1[bert_only] C=0.3: {'balanced_accuracy': 0.286177, 'macro_f1': 0.142043}
+  LogisticRegression-L1[bert_only] C=0.5: {'balanced_accuracy': 0.49349, 'macro_f1': 0.460855}
+  LogisticRegression-L1[bert_only] C=1.0: {'balanced_accuracy': 0.24404, 'macro_f1': 0.252566}
+  LogisticRegression-L1[bert_only] C=2.0: {'balanced_accuracy': 0.292451, 'macro_f1': 0.290387}
+  LogisticRegression-L1[bert_only] C=3.0: {'balanced_accuracy': 0.474402, 'macro_f1': 0.443015}
+  LogisticRegression-L1[bert_only] C=5.0: {'balanced_accuracy': 0.420597, 'macro_f1': 0.368497}
+  ★ best LogisticRegression-L1[bert_only]: C=0.5 → {'balanced_accuracy': 0.49349, 'macro_f1': 0.460855}
+  RidgeClassifier[bert_only]: {'balanced_accuracy': 0.567039, 'macro_f1': 0.554418}
+[hybrid] using X_train_hybrid_noL2.npz (per-block L2, no final L2)
+
+=== Source: hybrid | shape=(1422, 143195) | class_weight='balanced' ===
+  LinearSVC[hybrid] C=0.05: {'balanced_accuracy': 0.528959, 'macro_f1': 0.568104}
+  LinearSVC[hybrid] C=0.1: {'balanced_accuracy': 0.536088, 'macro_f1': 0.577422}
+  LinearSVC[hybrid] C=0.3: {'balanced_accuracy': 0.55205, 'macro_f1': 0.584143}
+  LinearSVC[hybrid] C=0.5: {'balanced_accuracy': 0.539291, 'macro_f1': 0.568358}
+  LinearSVC[hybrid] C=1.0: {'balanced_accuracy': 0.542633, 'macro_f1': 0.575237}
+  LinearSVC[hybrid] C=2.0: {'balanced_accuracy': 0.549775, 'macro_f1': 0.581255}
+  LinearSVC[hybrid] C=3.0: {'balanced_accuracy': 0.550697, 'macro_f1': 0.58742}
+  LinearSVC[hybrid] C=5.0: {'balanced_accuracy': 0.543554, 'macro_f1': 0.578127}
+  ★ best LinearSVC[hybrid]: C=0.3 → {'balanced_accuracy': 0.55205, 'macro_f1': 0.584143}
+  LogisticRegression[hybrid] C=0.05: {'balanced_accuracy': 0.530219, 'macro_f1': 0.525761}
+  LogisticRegression[hybrid] C=0.1: {'balanced_accuracy': 0.532049, 'macro_f1': 0.532158}
+  LogisticRegression[hybrid] C=0.3: {'balanced_accuracy': 0.537674, 'macro_f1': 0.539298}
+  LogisticRegression[hybrid] C=0.5: {'balanced_accuracy': 0.537674, 'macro_f1': 0.53704}
+  LogisticRegression[hybrid] C=1.0: {'balanced_accuracy': 0.539504, 'macro_f1': 0.545334}
+  LogisticRegression[hybrid] C=2.0: {'balanced_accuracy': 0.539504, 'macro_f1': 0.543834}
+  LogisticRegression[hybrid] C=3.0: {'balanced_accuracy': 0.539504, 'macro_f1': 0.54769}
+  LogisticRegression[hybrid] C=5.0: {'balanced_accuracy': 0.540413, 'macro_f1': 0.553949}
+  ★ best LogisticRegression[hybrid]: C=5.0 → {'balanced_accuracy': 0.540413, 'macro_f1': 0.553949}
+  LinearSVC-L1[hybrid] C=0.05: {'balanced_accuracy': 0.497779, 'macro_f1': 0.505922}
+  LinearSVC-L1[hybrid] C=0.1: {'balanced_accuracy': 0.487237, 'macro_f1': 0.501335}
+  LinearSVC-L1[hybrid] C=0.3: {'balanced_accuracy': 0.501039, 'macro_f1': 0.524376}
+  LinearSVC-L1[hybrid] C=0.5: {'balanced_accuracy': 0.529597, 'macro_f1': 0.564542}
+  LinearSVC-L1[hybrid] C=1.0: {'balanced_accuracy': 0.531664, 'macro_f1': 0.556511}
+  LinearSVC-L1[hybrid] C=2.0: {'balanced_accuracy': 0.514115, 'macro_f1': 0.538396}
+  LinearSVC-L1[hybrid] C=3.0: {'balanced_accuracy': 0.519622, 'macro_f1': 0.546434}
+  LinearSVC-L1[hybrid] C=5.0: {'balanced_accuracy': 0.514615, 'macro_f1': 0.54485}
+  ★ best LinearSVC-L1[hybrid]: C=1.0 → {'balanced_accuracy': 0.531664, 'macro_f1': 0.556511}
+  RidgeClassifier[hybrid]: {'balanced_accuracy': 0.567509, 'macro_f1': 0.588441}
+
+=== Source: tfidf_only ===
+
+=== Source: tfidf_only | shape=(1422, 36318) | class_weight='balanced' ===
+  LinearSVC[tfidf_only] C=0.05: {'balanced_accuracy': 0.65134, 'macro_f1': 0.582331}
+  LinearSVC[tfidf_only] C=0.1: {'balanced_accuracy': 0.630267, 'macro_f1': 0.574704}
+  LinearSVC[tfidf_only] C=0.3: {'balanced_accuracy': 0.657376, 'macro_f1': 0.631094}
+  LinearSVC[tfidf_only] C=0.5: {'balanced_accuracy': 0.633975, 'macro_f1': 0.618885}
+  LinearSVC[tfidf_only] C=1.0: {'balanced_accuracy': 0.623581, 'macro_f1': 0.624289}
+  LinearSVC[tfidf_only] C=2.0: {'balanced_accuracy': 0.625392, 'macro_f1': 0.628901}
+  LinearSVC[tfidf_only] C=3.0: {'balanced_accuracy': 0.632037, 'macro_f1': 0.638097}
+  LinearSVC[tfidf_only] C=5.0: {'balanced_accuracy': 0.618673, 'macro_f1': 0.624264}
+  ★ best LinearSVC[tfidf_only]: C=0.3 → {'balanced_accuracy': 0.657376, 'macro_f1': 0.631094}
+  LogisticRegression[tfidf_only] C=0.05: {'balanced_accuracy': 0.59668, 'macro_f1': 0.483065}
+  LogisticRegression[tfidf_only] C=0.1: {'balanced_accuracy': 0.594383, 'macro_f1': 0.500677}
+  LogisticRegression[tfidf_only] C=0.3: {'balanced_accuracy': 0.595776, 'macro_f1': 0.517372}
+  LogisticRegression[tfidf_only] C=0.5: {'balanced_accuracy': 0.582676, 'macro_f1': 0.519032}
+  LogisticRegression[tfidf_only] C=1.0: {'balanced_accuracy': 0.600478, 'macro_f1': 0.54972}
+  LogisticRegression[tfidf_only] C=2.0: {'balanced_accuracy': 0.58402, 'macro_f1': 0.567495}
+  LogisticRegression[tfidf_only] C=3.0: {'balanced_accuracy': 0.58535, 'macro_f1': 0.577122}
+  LogisticRegression[tfidf_only] C=5.0: {'balanced_accuracy': 0.59028, 'macro_f1': 0.584567}
+  ★ best LogisticRegression[tfidf_only]: C=1.0 → {'balanced_accuracy': 0.600478, 'macro_f1': 0.54972}
+  LinearSVC-L1[tfidf_only] C=0.05: {'balanced_accuracy': 0.057143, 'macro_f1': 0.025796}
+  LinearSVC-L1[tfidf_only] C=0.1: {'balanced_accuracy': 0.2404, 'macro_f1': 0.15356}
+  LinearSVC-L1[tfidf_only] C=0.3: {'balanced_accuracy': 0.549813, 'macro_f1': 0.467281}
+  LinearSVC-L1[tfidf_only] C=0.5: {'balanced_accuracy': 0.616729, 'macro_f1': 0.535357}
+  LinearSVC-L1[tfidf_only] C=1.0: {'balanced_accuracy': 0.601662, 'macro_f1': 0.551197}
+  LinearSVC-L1[tfidf_only] C=2.0: {'balanced_accuracy': 0.599495, 'macro_f1': 0.591232}
+  LinearSVC-L1[tfidf_only] C=3.0: {'balanced_accuracy': 0.612599, 'macro_f1': 0.616313}
+  LinearSVC-L1[tfidf_only] C=5.0: {'balanced_accuracy': 0.595379, 'macro_f1': 0.606356}
+  ★ best LinearSVC-L1[tfidf_only]: C=0.5 → {'balanced_accuracy': 0.616729, 'macro_f1': 0.535357}
+  RidgeClassifier[tfidf_only]: {'balanced_accuracy': 0.65038, 'macro_f1': 0.619816}
+
+=== TOP-10 по balanced_accuracy ===
+  0.6574 / f1=0.6311  LinearSVC[tfidf_only] C=0.3
+  0.6574 / f1=0.6311  LinearSVC[tfidf_only] C=0.3 ★best
+  0.6513 / f1=0.5823  LinearSVC[tfidf_only] C=0.05
+  0.6504 / f1=0.6198  RidgeClassifier[tfidf_only]
+  0.6340 / f1=0.6189  LinearSVC[tfidf_only] C=0.5
+  0.6320 / f1=0.6381  LinearSVC[tfidf_only] C=3.0
+  0.6303 / f1=0.5747  LinearSVC[tfidf_only] C=0.1
+  0.6254 / f1=0.6289  LinearSVC[tfidf_only] C=2.0
+  0.6236 / f1=0.6243  LinearSVC[tfidf_only] C=1.0
+  0.6187 / f1=0.6243  LinearSVC[tfidf_only] C=5.0
+
+Saved: ./data/hybrid-vec-custom-train/classical-results-hybrid-vec-custom-train-2026-06-12T23:57.json

@@ -80,6 +80,14 @@ python -m bert_embeddings.main \
 
 ## I baseline
 
+Для датасета train.csv:
+```
+python baseline.py \
+   --train-path=~/papadyk-vkr/data/train.csv \
+   --test-path=~/papadyk-vkr/data/test.csv
+```
+
+Для датасета train_augmented.csv:
 ```
 python baseline.py \
    --train-path=~/papadyk-vkr/data/train_augmented.csv \
